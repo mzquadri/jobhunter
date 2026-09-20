@@ -1,0 +1,73 @@
+# JobHunter -- three services: a database, the collector API, the dashboard.
+#
+#   docker compose up --build
+#   dashboard  http://localhost:3000
+#   API docs   http://localhost:8000/docs
+#
+# The API sweeps every source on a schedule and on startup, so the dashboard
+# has something in it within about half a minute of the first boot.
+
+name: jobhunter
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jobhunter}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobhunter}
+      POSTGRES_DB: ${POSTGRES_DB:-jobhunter}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Exposed so you can point a SQL client at it. Drop this line if you
+      # would rather it stayed inside the compose network.
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jobhunter} -d ${POSTGRES_DB:-jobhunter}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_USER: ${POSTGRES_USER:-jobhunter}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobhunter}
+      POSTGRES_DB: ${POSTGRES_DB:-jobhunter}
+      SWEEP_INTERVAL_MINUTES: ${SWEEP_INTERVAL_MINUTES:-60}
+      SWEEP_ON_STARTUP: ${SWEEP_ON_STARTUP:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PROFILE_PATH: /app/config/profile.yml
+      LETTER_PATH: /app/config/letter.md
+      DRAFTS_DIR: /data/drafts
+      ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
+      ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
+    volumes:
+      # Read-only: the container should never rewrite your profile.
+      - ./config:/app/config:ro
+      # Drafts are written here and stay on your machine.
+      - ./data/drafts:/data/drafts
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+  web:
+    build:
+      context: ./web
+      args:
+        # Inlined at build time, so it must be the URL your *browser* uses.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+
+volumes:
+  pgdata:

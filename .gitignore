@@ -1,0 +1,51 @@
+# ---------------------------------------------------------------------------
+# Personal data. None of this belongs in a public repository.
+# ---------------------------------------------------------------------------
+config/profile.yml
+config/letter.md
+.env
+.env.local
+data/
+exports/
+*.xlsx
+*.csv
+
+# the old single-file version, kept out of history
+dashboard.html
+seen.json
+history.log
+output/
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# ---------------------------------------------------------------------------
+# Node / Next.js
+# ---------------------------------------------------------------------------
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+.npm/
+
+# ---------------------------------------------------------------------------
+# Editors and OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
