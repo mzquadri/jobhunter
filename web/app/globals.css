@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+/*
+  Design notes, so future edits stay coherent.
+
+  One posting is one strip, not a card. Strips are how air traffic controllers
+  track flights: dense, one line per thing, scannable in a second. That is what
+  is needed when forty jobs are in play, and it is why there is no grid of
+  identical rounded cards here.
+
+  Colour carries status and nothing else, borrowed from cockpit convention:
+  green is go, amber is caution, red is warning. The warning flags map onto it
+  exactly, so the interface never spends a colour on decoration.
+
+  Priority is shown with weight, never hue. A dream employer gets a heavy left
+  rule, a priority one a medium rule, everything else a hairline. That keeps
+  hue free to mean exactly one thing.
+
+  Type is Bahnschrift (DIN 1451, the German engineering standard face) where it
+  is available, with Consolas for anything numeric so columns of figures line
+  up. Both ship with Windows, so there are no font downloads.
+*/
+
+@theme {
+  --font-sans: Bahnschrift, "DIN Alternate", "Segoe UI Variable Text",
+    "Segoe UI", system-ui, sans-serif;
+  --font-mono: Consolas, "Cascadia Mono", ui-monospace, monospace;
+
+  --color-paper: #e9ecf0;
+  --color-panel: #f7f8fa;
+  --color-sunk: #dfe3e9;
+  --color-ink: #0f151c;
+  --color-ink-2: #59646f;
+  --color-ink-3: #8d97a2;
+  --color-rule: #bcc4ce;
+  --color-hair: #d9dee4;
+
+  --color-go: #146b39;
+  --color-go-bg: #dcefe2;
+  --color-caution: #8a5600;
+  --color-caution-bg: #fbecc7;
+  --color-warn: #9a181f;
+  --color-warn-bg: #f9dcdd;
+  --color-live: #0b5a75;
+  --color-live-bg: #d3e9f2;
+}
+
+/* The viewer's own preference, unless they override it with the toggle. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-paper: #0c1016;
+    --color-panel: #151b23;
+    --color-sunk: #0a0e13;
+    --color-ink: #e7ecf2;
+    --color-ink-2: #98a4b2;
+    --color-ink-3: #66717e;
+    --color-rule: #333d49;
+    --color-hair: #222a33;
+    --color-go: #5fd18c;
+    --color-go-bg: #11301f;
+    --color-caution: #eab447;
+    --color-caution-bg: #33270f;
+    --color-warn: #f2888d;
+    --color-warn-bg: #3a1417;
+    --color-live: #6fcce8;
+    --color-live-bg: #0c2f3c;
+  }
+}
+
+:root[data-theme="light"] {
+  --color-paper: #e9ecf0;
+  --color-panel: #f7f8fa;
+  --color-sunk: #dfe3e9;
+  --color-ink: #0f151c;
+  --color-ink-2: #59646f;
+  --color-ink-3: #8d97a2;
+  --color-rule: #bcc4ce;
+  --color-hair: #d9dee4;
+  --color-go: #146b39;
+  --color-go-bg: #dcefe2;
+  --color-caution: #8a5600;
+  --color-caution-bg: #fbecc7;
+  --color-warn: #9a181f;
+  --color-warn-bg: #f9dcdd;
+  --color-live: #0b5a75;
+  --color-live-bg: #d3e9f2;
+}
+
+:root[data-theme="dark"] {
+  --color-paper: #0c1016;
+  --color-panel: #151b23;
+  --color-sunk: #0a0e13;
+  --color-ink: #e7ecf2;
+  --color-ink-2: #98a4b2;
+  --color-ink-3: #66717e;
+  --color-rule: #333d49;
+  --color-hair: #222a33;
+  --color-go: #5fd18c;
+  --color-go-bg: #11301f;
+  --color-caution: #eab447;
+  --color-caution-bg: #33270f;
+  --color-warn: #f2888d;
+  --color-warn-bg: #3a1417;
+  --color-live: #6fcce8;
+  --color-live-bg: #0c2f3c;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-live);
+  outline-offset: 2px;
+}
+
+/* One deliberate piece of motion: the sweep indicator, which is the only
+   thing on the page that is genuinely live. */
+@keyframes beat {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+.pulse {
+  animation: beat 2.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+  }
+}
