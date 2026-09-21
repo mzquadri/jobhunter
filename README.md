@@ -1,215 +1,260 @@
 # JobHunter
 
-Finds AI/ML jobs worth applying to, scores them against your CV, and drafts the
-cover letter — so the work left is reading and deciding, not searching.
+Finds the AI/ML jobs worth applying to, explains why each one scored what it
+did, and drafts the cover letter — so the work left is reading and deciding,
+not searching.
 
-It sweeps 27 company career systems and two job boards every hour, drops
-anything you could not take, and shows what survives on a dashboard. It never
-applies on your behalf.
+It sweeps 45 sources every hour, drops everything you could not take, and
+shows what survives. It never applies on your behalf.
 
 ```
-┌──────────┐   ┌───────────────────────────────┐   ┌──────────┐   ┌───────────┐
-│ 27 ATS   │──▶│ gates → score → warnings      │──▶│ Postgres │◀──│ dashboard │
-│ 2 boards │   │ (full-time? level? reachable? │   └──────────┘   └───────────┘
-└──────────┘   │  in field? still fresh?)      │          ▲
-  ~3,600       └───────────────────────────────┘          │
-  postings              ~40 worth reading         hourly sweep (APScheduler)
+~2,400 postings read  →  gates and scoring  →  ~90 worth your evening
 ```
+
+<!-- Screenshots: docs/screenshots/{overview,jobs,detail}.png -->
 
 ## Why it exists
 
-Job boards optimise for volume. A search for "machine learning engineer" in
-Germany returns thousands of results, most of which are senior roles, working
-student positions, postings from three months ago, or jobs in a country you
-cannot move to. Reading them is the actual work, and it is the part that stops
-people applying.
+A search for "machine learning engineer" in Germany returns thousands of
+results. Most are senior roles, working-student positions, postings from three
+months ago, or jobs in countries you cannot move to. Reading them is the actual
+work, and it is the part that stops people applying.
 
-This does the reading. What reaches the dashboard is full-time, at a level you
-can apply to, in a place you can work, in your field, and posted recently
-enough that applying is still worth the evening.
+This does the reading. What reaches the dashboard is full-time, at a level a
+recent graduate can apply to, somewhere you can legally work, in your field,
+and recent enough that applying is still worth the evening.
 
 ## What it does
 
-**Reads career systems directly.** Large employers do not build their own
-career sites; they rent one of about five Applicant Tracking Systems, each with
-a public JSON or RSS endpoint. So there is one adapter per ATS rather than one
-scraper per company, and adding a company is a single line of YAML.
+**Reads employer systems directly.** Large companies do not build their own
+career sites; they rent one of a handful of applicant-tracking systems, each
+with a public JSON or RSS endpoint. So there is one adapter per ATS rather than
+one scraper per company, and adding an employer is a line of YAML.
 
-| Adapter | Reaches | Notes |
-| --- | --- | --- |
-| `workday` | Airbus, ABB, Roche, Novartis, Thales, Philips, Logitech | Uses Workday's own posting-date facet so only recent roles come back |
-| `smartrecruiters` | Bosch, Continental, Etihad | Searches rather than lists — Bosch alone has 4,800 open roles |
-| `sf_rss` | BMW, MTU Aero, DLR, SAP, Swiss Re, Schaeffler, Novo Nordisk | Every SuccessFactors site answers the same RSS path |
-| `greenhouse` | Helsing, Isar Aerospace, Wayve, Celonis, Parloa, KONUX, Nuro | |
-| `lever` | any Lever board | |
-| `arbeitnow` | Germany-wide board | 1,000 newest postings, full text included |
-| `jobsch` | Switzerland | |
-| `adzuna` | DE, CH, AT, NL | Optional; adds salary data. Needs a free key |
+| Adapter | Reaches |
+| --- | --- |
+| `workday` | Airbus, ABB, Roche, Novartis, Thales, Philips, Accenture, Logitech |
+| `smartrecruiters` | Bosch, Continental, Etihad |
+| `successfactors` | BMW, ZF, MAN, TRATON, Scania, MTU Aero, DLR, SAP, Swiss Re, Schaeffler |
+| `greenhouse` | Helsing, Isar Aerospace, Wayve, Celonis, Anthropic, Databricks, N26 |
+| `ashby` | DeepL, Cohere, Parloa, Synthesia |
+| `lever`, `personio`, `workable` | ProGlove, Wandelbots, Agile Robots and any board on these |
+| `arbeitnow`, `jobsch` | Germany-wide and Switzerland-wide boards |
+| `adzuna` | Optional; adds salary data across DE/CH/AT/NL |
 
-LinkedIn and Indeed are deliberately absent: both block automated access, and
-LinkedIn automation risks a permanent account ban.
-
-**Filters before it scores.** Five gates, each added because something real got
+**Filters before it scores.** Four gates, each added because something real got
 through without it:
 
-1. **Full-time only** — drops Praktikum, Werkstudent, placements, VIE, PhD
+1. **Full-time only** — drops Praktikum, Werkstudent, placements, VIE and PhD
    positions. `graduate programme` and `trainee` are deliberately kept.
-2. **A level you can apply to** — drops Senior, Lead, Principal, Head of.
-3. **Your field** — an ML/AI/data term has to be in the title.
-4. **Somewhere you can work** — drops postings outside Europe. Without this
-   gate, a perfectly matched role in Bangalore outranked every job in Munich:
-   the skills matched beautifully and nothing told the scorer that the location
-   made the job useless.
-5. **Still fresh** — nothing older than `max_age_days` (14 by default).
+2. **Your field** — an ML/AI/data term must be in the title.
+3. **Somewhere you can work** — drops postings outside Europe. Without this, a
+   perfectly matched role in Bangalore outranked every job in Munich: the
+   skills matched and nothing said the location made it useless.
+4. **Still fresh** — nothing older than `max_age_days`.
 
-**Scores what is left,** weighting freshness steeply (a posting under 48 hours
-old is worth more than any other single factor), then location, then the skills
-and domains the posting actually names.
+Seniority is *not* a gate. A senior role stays searchable and takes a heavy
+penalty, so it sinks rather than disappearing.
 
-**Warns instead of guessing.** Three flags never reject a posting but do cost
-it points:
+**Explains every score.** Seven sub-scores, the reasons behind them, and the
+gaps against your profile — all visible, none hidden behind a tooltip:
 
-- `DEUTSCH` — asks for fluent German
-- `EU-ONLY` — asks for EU citizenship or security clearance
-- `NO-VISA` — states that sponsorship is not available
+```
+Overall 78          Technical 86   Location 91   Freshness 100
+                    Experience 95  Language 95   Domain 63    Education 85
 
-A large share of aerospace and defence postings carry `EU-ONLY`. Knowing that
-in two seconds rather than two hours is most of the value here.
++ Matches your genai experience: llm, rag, retrieval-augmented
++ Spans 5 of your skill areas
++ Advertised at graduate or junior level
+− Asks for azure, which is not on your profile
+```
 
-**Drafts the letter.** `config/letter.md` holds every paragraph you might use,
-each tagged. For a given posting the tags are scored against what the job asked
-for and the best three are kept, so an aerospace role and a pharma imaging role
-get genuinely different letters rather than the same letter with the company
-name swapped. Each strong match gets a folder with the draft, the saved job
-description, a summary and a checklist.
+**Classifies the language requirement** into nine levels, from *English only*
+through *German C1+*, each with the sentence it was read from. A large share of
+German postings are effectively closed to a non-fluent speaker, and knowing
+which in two seconds rather than two hours is most of the value here.
 
-**Tells you what broke.** A sweep that found nothing because a source stopped
-answering looks exactly like a sweep where nothing was posted. Failed sources
-are recorded per sweep and shown on the dashboard.
+**Never invents a salary.** A figure appears only when the employer printed
+one. Anything annualised or converted is marked `≈`, so a derived number is
+never mistaken for the employer's own. There is no market-data estimator,
+because there is no source for one — and a plausible guess is worse than an
+empty field, since it looks like information.
+
+**Tells you what broke.** A run that found nothing because six sources failed
+looks identical to a run where nothing was posted, unless the difference is
+recorded. Every source's outcome is stored per run and shown on the dashboard.
 
 ## Quick start
 
 Requires Docker.
 
 ```bash
+git clone https://github.com/mzquadri/jobhunter
+cd jobhunter
+
 cp .env.example .env
 cp config/profile.example.yml config/profile.yml
-cp config/letter.example.md config/letter.md
-# edit both config files — they are yours and are gitignored
+cp config/letter.example.md   config/letter.md
+# edit both config files — they are yours, and gitignored
 
-docker compose up --build
+docker compose up -d --build
 ```
 
-- Dashboard — <http://localhost:3000>
-- API docs — <http://localhost:8000/docs>
+| | |
+| --- | --- |
+| Dashboard | <http://localhost:3000> |
+| API | <http://localhost:8000> |
+| API docs | <http://localhost:8000/docs> |
 
-The API sweeps on startup and then hourly, so the dashboard fills itself in
-within about half a minute of the first boot.
+The worker sweeps on startup and then hourly, so the dashboard fills itself in
+within about a minute of the first boot.
 
 ## The dashboard
 
-Postings are strips, not cards — dense and scannable, the way air traffic
-control tracks flights, because forty of them have to be readable at a glance.
-Colour carries status and nothing else, using cockpit convention: green is go,
-amber is caution, red is warning, matching the flags exactly. Priority is shown
-with weight instead — a dream employer gets a heavy left rule, everything else
-a lighter one — so hue is never spent on decoration.
+- **Overview** — what arrived today, what is new since the last run, postings
+  per day, and breakdowns by country, language, category and match.
+- **Jobs** — a filterable table: country, employer tier, language requirement,
+  work arrangement, status, minimum match, posting age. Saved searches run the
+  same query code, so a saved filter behaves exactly like the one that made it.
+- **Job detail** — the full match analysis, every source that reported the
+  vacancy, the posting itself, and your own tracking panel.
+- **Companies** — who is checked hourly and who has to be checked by hand.
+- **Discovery** — run history, per-source health, what each run did.
 
-The header is a live readout: counts, a fourteen-day posting histogram, and how
-long ago the last sweep ran.
+## Application tracking
 
-Keyboard: `/` search · `j` `k` move · `Enter` expand · `o` open the posting ·
-`s` star · `x` hide.
+Thirteen statuses from *New* to *Offer*, with a recorded history of every
+transition, plus notes, contact person, follow-up date and salary discussion.
 
-Starred, hidden and application status live in the database, so a sweep never
-overwrites them.
+These fields are yours. **A discovery run never writes them**, so re-running is
+always safe — a sweep can refresh a score while your notes stay untouched. That
+invariant is asserted directly in the test suite.
 
 ## Configuration
 
 Everything lives in `config/profile.yml`. There is no code to change.
 
-Adding a company is one line:
-
 ```yaml
 companies:
-  - { name: Siemens Energy, adapter: workday, arg: "tenant|wd3|SiteName", tier: PRIORITY }
+  - { name: Siemens Energy, adapter: workday, arg: "tenant|wd3|SiteName", tier: high }
 ```
-
-Which adapter a company uses is visible in its careers URL:
-
-| URL contains | adapter | `arg` |
-| --- | --- | --- |
-| `*.myworkdayjobs.com` | `workday` | `tenant\|wdN\|CareerSiteName` |
-| `*.smartrecruiters.com` | `smartrecruiters` | company slug |
-| `jobs.<company>.com` | `sf_rss` | that hostname |
-| `boards.greenhouse.io/<slug>` | `greenhouse` | the slug |
-| `jobs.lever.co/<slug>` | `lever` | the slug |
 
 Worth knowing:
 
 | Setting | Does |
 | --- | --- |
 | `search.max_age_days` | Hides anything older. Default 14 |
-| `search.min_score` | Below this a posting is noise. Default 20 |
+| `search.min_score` | Below this a posting is noise |
 | `search.draft_min_score` | Only stronger matches get a cover-letter draft |
-| `locations.tiers` | Points per city. Munich 22, Germany 18, Switzerland 16 |
-| `locations.exclude` | Hard reject. India, US, China and so on |
-| `scoring.freshness` | `[[days, points], …]`. Steep by design |
+| `locations.tiers` | Points per city — Munich 24, Germany 20, Switzerland 17 |
+| `locations.exclude` | Hard reject |
+| `scoring.weights` | How much each sub-score contributes |
+| `scoring.freshness_curve` | `[[days, score], …]`. Steep by design |
 | `flags` | Warning rules and what each costs |
+| `saved_searches` | Seeded on first boot; yours are never overwritten |
 
-Some career sites — Ferrari, Lamborghini, Audi, Porsche, Volkswagen,
-Mercedes-Benz, Emirates, Siemens, ZEISS — render their listings with
-JavaScript and publish no open endpoint. Nothing can read them automatically,
-so they sit in a `watchlist` the dashboard renders as one-click links rather
-than pretending otherwise.
+`config/profile.yml` and `config/letter.md` are gitignored. The committed
+`*.example.*` files carry placeholders only.
 
-## Architecture
+## How matching works
+
+Each sub-score is 0–100, combined by the weights in your profile, then adjusted:
 
 ```
-api/                     FastAPI + SQLAlchemy 2.0 + APScheduler
-  app/collector/         the part that talks to the outside world
-    sources.py           one adapter per ATS
-    matcher.py           gates, scoring, warning flags
-    drafter.py           tag-matched cover letters
-    pipeline.py          one sweep, start to finish
-  app/routers/           /api/jobs, /api/stats, /api/sweeps
-  app/models.py          jobs, sweeps, source problems
-  tests/                 57 tests over the gates, dates and drafting
-web/                     Next.js 15 + React 19 + Tailwind 4, TypeScript
-config/                  your profile and letter (gitignored)
-data/drafts/             generated application folders (gitignored)
+score = Σ(sub_score × weight)
+      + tier_bonus        (a shortlisted employer lifts a good match)
+      − seniority_penalty (senior 30, lead 45, executive 60)
+      − flag_penalties    (EU-only 20, no-sponsorship 20, German 10)
 ```
 
-A posting is keyed by a fingerprint of company plus normalised title, not by
-its URL — most ATS platforms mint a fresh URL whenever a posting is edited, and
-without a stable key the same job is announced as new every time someone fixes
-a typo in it.
+Nothing is random and nothing is a constant buried in code. The reasons shown
+in the interface are generated by the same calculation that produced the
+number — if it says "Strong PyTorch match", the technical sub-score rose
+because the word PyTorch is in the posting.
 
-The scheduler runs inside the API process. For one user and a sweep that takes
-about twenty seconds, a queue and a broker would be more moving parts than the
-job deserves.
+See [docs/architecture.md](docs/architecture.md) for the full pipeline,
+deduplication strategy and the invariants the design protects.
+
+## Scheduler
+
+APScheduler inside a dedicated worker container, with its schedule persisted in
+PostgreSQL so it survives restarts. Every run first takes a Postgres advisory
+lock, so scaling to several workers cannot double-ingest — the loser skips its
+tick rather than queueing a duplicate sweep.
+
+No Redis, no broker. The database already provides durability and mutual
+exclusion; adding a broker would be a service to run in exchange for nothing
+this workload needs.
+
+## Security and privacy
+
+- **No secrets in the repository.** `.env` and `config/profile.yml` are
+  gitignored; every push is preceded by a secret scan (`scripts/audit.sh`).
+- **SSRF protection.** Provider responses supply URLs that this system then
+  fetches. Every one is validated: HTTPS only, DNS resolved, private and
+  link-local ranges refused.
+- **Ingested HTML is sanitised** at the boundary, twice — once on the raw
+  markup and again after entity decoding, so encoded markup cannot survive a
+  single pass.
+- **Logs redact** anything resembling a credential.
+- **Non-root containers** with real healthchecks.
+- **Respectful collection.** Per-host rate limiting, retries with jittered
+  backoff, `Retry-After` honoured. No CAPTCHA circumvention, no authentication
+  bypass, no scraping of sites that forbid it.
 
 ## Development
 
 ```bash
-# API
+# API — 215 tests
 cd api && pip install -e ".[dev]"
 ruff check . && pytest -q
 
 # dashboard
 cd web && npm install
 npm run typecheck && npm run lint && npm run build
+
+# regenerate the TypeScript client from the live OpenAPI schema
+npm run generate:types
+
+# migrations
+cd api && alembic revision --autogenerate -m "what changed" && alembic upgrade head
 ```
 
-CI runs all of the above plus both Docker builds on every push.
+Tests cover the gates, date parsing across every ATS format, salary extraction
+in German and English conventions, deduplication (including the same vacancy
+from several sources), provider parsing against recorded fixtures, and the full
+API surface.
+
+CI runs all of it plus both Docker builds on every push.
+
+## Troubleshooting
+
+| Symptom | Cause |
+| --- | --- |
+| Dashboard says it cannot reach the API | `docker compose ps` — is `api` healthy? |
+| `migrate` exited with an error | `docker compose logs migrate`. `api` and `worker` wait for it deliberately |
+| No jobs after the first boot | The first sweep takes about a minute. `docker compose logs worker` |
+| A source shows as failed | Expected occasionally. It is backed off and retried later; see **Discovery** |
+| Everything is `Not stated` for language | That source publishes only a short preview. The detail page links to the original |
 
 ## What it will not do
 
-It does not submit applications. The target employers use portals with
-per-job questionnaires and CAPTCHAs; LinkedIn automation risks a permanent
-account ban; and these roles are read by humans, so an auto-generated
-application earns an auto-generated rejection. The value here is knowing
-within the hour and having the letter 90% written — not pressing submit.
+It does not submit applications. The target employers use portals with per-job
+questionnaires and CAPTCHAs; LinkedIn automation risks a permanent account ban;
+and these roles are read by humans, so an auto-generated application earns an
+auto-generated rejection.
+
+It will not accept legal declarations, salary agreements, relocation or visa
+commitments, or background-check consent on your behalf. It prepares. You
+decide.
+
+## Roadmap
+
+- Embedding-based skill matching, kept alongside the literal match rather than
+  replacing it, so explanations survive
+- Optional notifications (email, Telegram) on high-match discoveries
+- Browser-assisted form pre-fill, with a human pressing submit
+- More provider adapters as employers expose endpoints
 
 ## Licence
 
