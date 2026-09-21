@@ -36,12 +36,14 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.db import SessionLocal, advisory_lock, engine, wait_for_schema
 from app.logging_conf import configure_logging
 from app.services.discovery import run_discovery
-from app.settings import get_profile, get_settings
+from app.services.profile_service import load_document, load_profile, seed_if_missing
+from app.settings import get_settings
 
 log = logging.getLogger("jobhunter.worker")
 
 JOB_ID = "discovery"
 _shutdown = threading.Event()
+_scheduler: BlockingScheduler | None = None
 
 
 def sweep(triggered_by: str = "scheduler") -> None:
@@ -52,7 +54,9 @@ def sweep(triggered_by: str = "scheduler") -> None:
             log.info("another worker holds the discovery lock; skipping this tick")
             return
         try:
-            run = run_discovery(session, get_profile(), settings, triggered_by)
+            # Read settings fresh from the database, so a preference changed
+            # in the UI takes effect on this very run.
+            run = run_discovery(session, load_profile(session), settings, triggered_by)
         except Exception:
             log.exception("discovery raised")
             return
@@ -65,8 +69,41 @@ def sweep(triggered_by: str = "scheduler") -> None:
             run.duplicates_merged, run.drafts_written, run.errors_count,
         )
 
+        # The cadence is a user setting. APScheduler fixes an interval when
+        # the job is created, so without this a frequency changed in the UI
+        # would be saved and then quietly ignored forever.
+        _apply_cadence(session)
 
-def build_scheduler(settings) -> BlockingScheduler:
+
+def configured_interval(session) -> int:
+    """Scan frequency in minutes, from settings. 0 means manual only."""
+    automation = load_document(session).automation
+    return automation.scan_interval_minutes if automation.enabled else 0
+
+
+def _apply_cadence(session) -> None:
+    """Reschedule the sweep if the user has changed how often it should run."""
+    if _scheduler is None:
+        return
+    job = _scheduler.get_job(JOB_ID)
+    if job is None:
+        return
+
+    wanted = configured_interval(session)
+    current = getattr(job.trigger, "interval", None)
+    current_minutes = int(current.total_seconds() // 60) if current else None
+
+    if wanted <= 0:
+        log.info("scanning disabled in settings; removing the schedule")
+        _scheduler.remove_job(JOB_ID)
+        return
+
+    if current_minutes != wanted:
+        log.info("scan frequency changed from %s to %s minutes", current_minutes, wanted)
+        _scheduler.reschedule_job(JOB_ID, trigger=IntervalTrigger(minutes=wanted))
+
+
+def build_scheduler(settings, interval_minutes: int) -> BlockingScheduler:
     scheduler = BlockingScheduler(
         timezone="UTC",
         jobstores={"default": SQLAlchemyJobStore(engine=engine,
@@ -81,7 +118,7 @@ def build_scheduler(settings) -> BlockingScheduler:
     )
     scheduler.add_job(
         sweep,
-        trigger=IntervalTrigger(minutes=settings.sweep_interval_minutes),
+        trigger=IntervalTrigger(minutes=interval_minutes),
         id=JOB_ID,
         name="Discovery sweep",
         replace_existing=True,
@@ -93,13 +130,22 @@ def main() -> int:
     settings = get_settings()
     configure_logging(settings)
 
-    if settings.sweep_interval_minutes <= 0:
-        log.info("SWEEP_INTERVAL_MINUTES is 0; the worker will idle")
-
     log.info("worker %s starting", settings.worker_name)
     wait_for_schema()
 
-    if settings.sweep_on_startup:
+    # First boot creates the settings row from the YAML seed.
+    with SessionLocal() as session:
+        seed_if_missing(session)
+        interval = configured_interval(session)
+        automation = load_document(session).automation
+
+    # Settings, not the environment. Both existed for a while, which meant the
+    # toggle in the Automation screen was saved and then ignored -- the worker
+    # was still reading SWEEP_ON_STARTUP. One source of truth, and it is the
+    # one the user can actually see.
+    scan_on_startup = automation.scan_on_startup and automation.enabled
+
+    if scan_on_startup:
         # In a thread so a slow first sweep does not delay the scheduler
         # taking over its own clock.
         log.info("running a sweep on startup")
@@ -107,11 +153,14 @@ def main() -> int:
             target=sweep, args=("startup",), name="startup-sweep", daemon=True
         ).start()
 
-    if settings.sweep_interval_minutes <= 0:
+    if interval <= 0:
+        log.info("scanning is disabled in settings; the worker will idle")
         _shutdown.wait()
         return 0
 
-    scheduler = build_scheduler(settings)
+    global _scheduler
+    scheduler = build_scheduler(settings, interval)
+    _scheduler = scheduler
 
     def stop(signum, _frame):
         log.info("signal %s received; shutting down", signum)
@@ -121,9 +170,8 @@ def main() -> int:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
-    log.info("sweeping every %d minutes; next run at %s",
-             settings.sweep_interval_minutes,
-             datetime.now().isoformat(timespec="seconds"))
+    log.info("sweeping every %d minutes (from settings); started at %s",
+             interval, datetime.now().isoformat(timespec="seconds"))
     with suppress(KeyboardInterrupt, SystemExit):
         scheduler.start()
     return 0

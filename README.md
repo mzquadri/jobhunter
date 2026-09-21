@@ -1,17 +1,22 @@
-# JobHunter
+# CareerOS
 
 Finds the AI/ML jobs worth applying to, explains why each one scored what it
-did, and drafts the cover letter — so the work left is reading and deciding,
-not searching.
+did, tracks the ones you pursue, and drafts the cover letter — so the work left
+is reading and deciding, not searching.
 
-It sweeps 45 sources every hour, drops everything you could not take, and
-shows what survives. It never applies on your behalf.
+It reads 45 sources every hour, drops everything you could not take, and shows
+what survives. It never applies on your behalf.
 
 ```
 ~2,400 postings read  →  gates and scoring  →  ~90 worth your evening
 ```
 
-<!-- Screenshots: docs/screenshots/{overview,jobs,detail}.png -->
+A complete application, not a set of endpoints: a setup wizard on first run, a
+command centre, a job explorer, a drag-and-drop application pipeline, employer
+management, automation controls, analytics and a settings screen. Nothing in
+normal use asks you to open a terminal, Swagger or a database client.
+
+<!-- Screenshots: docs/screenshots/{overview,jobs,pipeline,analytics}.png -->
 
 ## Why it exists
 
@@ -95,36 +100,52 @@ cd jobhunter
 cp .env.example .env
 cp config/profile.example.yml config/profile.yml
 cp config/letter.example.md   config/letter.md
-# edit both config files — they are yours, and gitignored
 
 docker compose up -d --build
 ```
 
+Then open <http://localhost:3000>. The setup wizard runs on first visit and
+fills everything in from the defaults, so you can press Next through it and
+change your mind later in Settings. The copied config files are the seed for
+that first boot — they are yours, and both are gitignored.
+
+The worker scans on startup and then hourly, so the first roles appear within
+about a minute.
+
 | | |
 | --- | --- |
-| Dashboard | <http://localhost:3000> |
+| The application | <http://localhost:3000> |
 | API | <http://localhost:8000> |
-| API docs | <http://localhost:8000/docs> |
+| API reference | <http://localhost:8000/docs> — for extending it, not for using it |
 
-The worker sweeps on startup and then hourly, so the dashboard fills itself in
-within about a minute of the first boot.
+## The application
 
-## The dashboard
+| Screen | For |
+| --- | --- |
+| **Overview** | What changed since you last looked: new roles, career signals, pipeline and the employers you have to check by hand |
+| **Jobs** | The explorer. One-click views, full filter panel, table or cards, and a detail panel that keeps you in your list |
+| **Applications** | A pipeline board. Drag a role between stages, or move it from the menu on the card |
+| **Companies** | Who is watched, how each one is read, and who publishes no feed at all |
+| **Automation** | What the scanner is doing and what it did — schedule, run history, per-source health |
+| **Analytics** | What the market looks like for your profile, including how much of it stated a salary |
+| **Settings** | Everything the scanner uses, in seven sections, each saving on its own |
+| **Set up** | A six-step wizard on first run. Everything is pre-filled; you can press Next through it |
 
-- **Overview** — what arrived today, what is new since the last run, postings
-  per day, and breakdowns by country, language, category and match.
-- **Jobs** — a filterable table: country, employer tier, language requirement,
-  work arrangement, status, minimum match, posting age. Saved searches run the
-  same query code, so a saved filter behaves exactly like the one that made it.
-- **Job detail** — the full match analysis, every source that reported the
-  vacancy, the posting itself, and your own tracking panel.
-- **Companies** — who is checked hourly and who has to be checked by hand.
-- **Discovery** — run history, per-source health, what each run did.
+`⌘K` / `Ctrl+K` opens a command palette that searches jobs against the API,
+jumps to any screen, starts a scan, or switches the theme. `/` focuses search.
+
+Keyboard, light and dark, empty states that say what to do next, and error
+states that say what went wrong — not a spinner that never resolves.
 
 ## Application tracking
 
 Thirteen statuses from *New* to *Offer*, with a recorded history of every
 transition, plus notes, contact person, follow-up date and salary discussion.
+Eight of those statuses are the columns of the pipeline board.
+
+Moving a role to *Applied* fills in the date you applied and schedules a
+follow-up, so the reminder is real rather than something you have to remember
+to set. Both are yours to change, and the delay is a setting.
 
 These fields are yours. **A discovery run never writes them**, so re-running is
 always safe — a sweep can refresh a score while your notes stay untouched. That
@@ -132,14 +153,23 @@ invariant is asserted directly in the test suite.
 
 ## Configuration
 
-Everything lives in `config/profile.yml`. There is no code to change.
+**Settings live in the database and are edited in the Settings screen.** They
+take effect on the next scan — there is no file to edit and no restart.
+
+`config/profile.yml` is the *seed*: it is read once, on the first boot of an
+empty database, to populate those settings. Editing it afterwards changes
+nothing, because the database is the source of truth from that point on.
+*Restore defaults* in Settings re-reads it.
+
+The employer list is the one part still expressed there, because adding an
+employer is a line of YAML rather than a form:
 
 ```yaml
 companies:
   - { name: Siemens Energy, adapter: workday, arg: "tenant|wd3|SiteName", tier: high }
 ```
 
-Worth knowing:
+Each setting, under its name in the Settings screen:
 
 | Setting | Does |
 | --- | --- |
@@ -153,8 +183,10 @@ Worth knowing:
 | `flags` | Warning rules and what each costs |
 | `saved_searches` | Seeded on first boot; yours are never overwritten |
 
-`config/profile.yml` and `config/letter.md` are gitignored. The committed
-`*.example.*` files carry placeholders only.
+`config/profile.yml` and `config/letter.md` are gitignored, and so is the
+database volume. The committed `*.example.*` files carry placeholders only —
+your name, contact details, notes and application history never reach the
+repository.
 
 ## How matching works
 
@@ -205,7 +237,7 @@ this workload needs.
 ## Development
 
 ```bash
-# API — 215 tests
+# API — 247 tests
 cd api && pip install -e ".[dev]"
 ruff check . && pytest -q
 
@@ -214,6 +246,7 @@ cd web && npm install
 npm run typecheck && npm run lint && npm run build
 
 # regenerate the TypeScript client from the live OpenAPI schema
+# (the stack has to be running — it reads http://localhost:8000/openapi.json)
 npm run generate:types
 
 # migrations
@@ -231,11 +264,13 @@ CI runs all of it plus both Docker builds on every push.
 
 | Symptom | Cause |
 | --- | --- |
-| Dashboard says it cannot reach the API | `docker compose ps` — is `api` healthy? |
+| "CareerOS cannot reach its backend" | `docker compose ps` — is `api` healthy? |
 | `migrate` exited with an error | `docker compose logs migrate`. `api` and `worker` wait for it deliberately |
-| No jobs after the first boot | The first sweep takes about a minute. `docker compose logs worker` |
-| A source shows as failed | Expected occasionally. It is backed off and retried later; see **Discovery** |
-| Everything is `Not stated` for language | That source publishes only a short preview. The detail page links to the original |
+| No roles after the first boot | The first scan takes about a minute. **Automation** shows it running; `docker compose logs worker` has the detail |
+| A source shows as failed | Expected occasionally. It is backed off and retried later; see **Automation → Sources** |
+| A setting did not seem to apply | Settings apply from the *next* scan. **Automation → Scan now** makes that immediate |
+| Everything is `Not stated` for language | That source publishes only a short preview. The job panel links to the original |
+| The setup wizard keeps appearing | Setup is only marked complete when you finish it. Press **Open CareerOS** on the last step |
 
 ## What it will not do
 

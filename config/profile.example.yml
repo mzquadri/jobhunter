@@ -1,11 +1,16 @@
 # ---------------------------------------------------------------------------
-# JobHunter profile
+# CareerOS settings seed
 #
 # Copy to config/profile.yml and make it yours. That file is gitignored, so
 # your name, contact details and search history never reach the repository.
 #
-# Everything discovery and ranking do is driven from here. Adding an employer
-# is one line; there is no code to change.
+# This file is a SEED. It is read once, on the first boot of an empty
+# database, and never again — from then on the settings live in the database
+# and are edited in the Settings screen, which is what a scan reads. Editing
+# this file afterwards changes nothing until you press "Restore defaults".
+#
+# Everything discovery and ranking do is driven from these values. Adding an
+# employer is one line; there is no code to change.
 # ---------------------------------------------------------------------------
 
 candidate:

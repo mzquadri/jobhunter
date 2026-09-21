@@ -254,6 +254,27 @@ class TestWritePath:
         body = client.patch(self.JOB, json={"status": "applied"}).json()
         assert body["applied_at"] == date.today().isoformat()
 
+    def test_applying_schedules_the_follow_up(self, client, seeded):
+        """Without this the follow-up reminder could never fire."""
+        after = client.get("/api/settings").json()["profile"]["notifications"][
+            "follow_up_after_days"
+        ]
+        body = client.patch(self.JOB, json={"status": "applied"}).json()
+        expected = date.today() + timedelta(days=after)
+        assert body["follow_up_at"] == expected.isoformat()
+
+    def test_a_follow_up_date_you_chose_is_left_alone(self, client, seeded):
+        chosen = (date.today() + timedelta(days=21)).isoformat()
+        client.patch(self.JOB, json={"follow_up_at": chosen})
+        body = client.patch(self.JOB, json={"status": "applied"}).json()
+        assert body["follow_up_at"] == chosen
+
+    def test_zero_days_means_no_follow_up_date(self, client, seeded):
+        client.patch("/api/settings", json={"notifications": {"follow_up_after_days": 0}})
+        body = client.patch(self.JOB, json={"status": "applied"}).json()
+        assert body["applied_at"] == date.today().isoformat()
+        assert body["follow_up_at"] is None
+
     def test_notes_and_contact_round_trip(self, client, seeded):
         body = client.patch(
             self.JOB,

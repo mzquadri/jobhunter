@@ -11,11 +11,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import engine, get_session
+from app.deps import profile_dep
 from app.models import Company, Job, ProviderHealth, Run, SavedSearch
+from app.models.base import slugify
 from app.routers.jobs import apply_filters, apply_sort
 from app.routers.serialize import to_summary
 from app.schemas import (
     CompanyOut,
+    CompanyPatch,
     JobPage,
     ProviderHealthOut,
     RunDetail,
@@ -23,7 +26,8 @@ from app.schemas import (
     SavedSearchIn,
     SavedSearchOut,
 )
-from app.settings import Profile, get_profile
+from app.services import profile_service
+from app.settings import Profile
 
 companies = APIRouter(prefix="/api/companies", tags=["companies"])
 runs = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -68,6 +72,83 @@ def get_company(company_id: str, session: Session = Depends(get_session)) -> Com
     if row is None:
         raise HTTPException(status_code=404, detail="No company with that id")
     return _out(row)
+
+
+@companies.patch("/{company_id}", response_model=CompanyOut,
+                 summary="Change a company's priority")
+def patch_company(
+    company_id: str,
+    payload: CompanyPatch,
+    session: Session = Depends(get_session),
+) -> CompanyOut:
+    """Promote or demote an employer from the interface.
+
+    Written to two places on purpose. The row is what every read and the next
+    score use; the settings document is what ``sync_companies`` reconciles the
+    row against at the start of each scan. Writing only the row looked correct
+    for an hour and was then silently reverted by the next scan.
+
+    Notes stay on the row alone: they are the candidate's, and the seed
+    document has no business holding them.
+    """
+    row = session.get(Company, company_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No company with that id")
+
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(row, key, value)
+    session.commit()
+    session.refresh(row)
+
+    reconciled = {k: v for k, v in data.items() if k in ("tier", "enabled")}
+    if reconciled:
+        _persist_company_config(session, company_id, reconciled)
+
+    return _out(row)
+
+
+def _persist_company_config(session: Session, company_id: str, changes: dict) -> None:
+    """Mirror a company change into the stored settings document.
+
+    Silent when the employer is not in the document: an employer discovered
+    from a board has no config entry, and inventing one would add a source the
+    candidate never asked to watch.
+    """
+    # The stored JSON rather than the validated model: this rewrites one entry
+    # in a list and hands it straight back, and round-tripping through the
+    # model would drop nothing but buy nothing either.
+    row = profile_service.seed_if_missing(session)
+    entries = [dict(e) for e in (row.profile.get("companies") or [])]
+    for entry in entries:
+        if slugify(str(entry.get("name") or "")) == company_id:
+            entry.update(changes)
+            profile_service.update_document(session, {"companies": entries})
+            return
+
+
+@companies.get("/{company_id}/jobs", response_model=JobPage,
+               summary="Roles at one company")
+def company_jobs(
+    company_id: str,
+    session: Session = Depends(get_session),
+    include_closed: bool = False,
+    limit: int = Query(100, ge=1, le=500),
+) -> JobPage:
+    company = session.get(Company, company_id)
+    if company is None:
+        raise HTTPException(status_code=404, detail="No company with that id")
+
+    stmt = select(Job).where(Job.company_id == company_id)
+    if not include_closed:
+        stmt = stmt.where(Job.is_open.is_(True))
+    rows = session.scalars(
+        stmt.order_by(Job.score.desc(), Job.posted_at.desc().nullslast()).limit(limit)
+    ).all()
+    return JobPage(
+        items=[to_summary(j, company.tier) for j in rows],
+        total=len(rows), limit=limit, offset=0,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +235,7 @@ def delete_search(search_id: int, session: Session = Depends(get_session)) -> No
 def run_search(
     search_id: int,
     session: Session = Depends(get_session),
-    profile: Profile = Depends(get_profile),
+    profile: Profile = Depends(profile_dep),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> JobPage:

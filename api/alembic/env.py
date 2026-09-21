@@ -24,6 +24,24 @@ config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 target_metadata = Base.metadata
 
+# Tables created and owned by a library at runtime, not by our models.
+# APScheduler builds `scheduler_jobs` itself when the worker starts.
+#
+# Without this, autogenerate sees a table absent from Base.metadata and emits
+# a DROP for it. That is not hypothetical: it happened, the generated
+# migration dropped the scheduler's table, and the "schedule survives a
+# restart" guarantee went with it.
+EXTERNALLY_MANAGED_TABLES = frozenset({"scheduler_jobs"})
+
+
+def include_object(obj, name, type_, reflected, compare_to) -> bool:
+    """Keep autogenerate away from tables this application does not own."""
+    if type_ == "table" and name in EXTERNALLY_MANAGED_TABLES:
+        return False
+    if type_ == "index" and getattr(obj, "table", None) is not None:
+        return obj.table.name not in EXTERNALLY_MANAGED_TABLES
+    return True
+
 
 def run_migrations_offline() -> None:
     context.configure(
@@ -33,6 +51,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
         compare_server_default=True,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -50,6 +69,7 @@ def run_migrations_online() -> None:
             target_metadata=target_metadata,
             compare_type=True,
             compare_server_default=True,
+            include_object=include_object,
         )
         with context.begin_transaction():
             context.run_migrations()
