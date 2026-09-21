@@ -1,13 +1,36 @@
-# JobHunter -- three services: a database, the collector API, the dashboard.
+# JobHunter
 #
-#   docker compose up --build
+#   cp .env.example .env
+#   cp config/profile.example.yml config/profile.yml
+#   cp config/letter.example.md   config/letter.md
+#   docker compose up -d --build
+#
 #   dashboard  http://localhost:3000
 #   API docs   http://localhost:8000/docs
 #
-# The API sweeps every source on a schedule and on startup, so the dashboard
-# has something in it within about half a minute of the first boot.
+# Five services. `migrate` runs to completion before `api` and `worker` start,
+# so neither ever meets a half-migrated database and two API replicas cannot
+# race each other into applying the same migration.
 
 name: jobhunter
+
+x-api-image: &api-image
+  build:
+    context: ./api
+  image: jobhunter-api:latest
+
+x-api-env: &api-env
+  POSTGRES_HOST: db
+  POSTGRES_USER: ${POSTGRES_USER:-jobhunter}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobhunter}
+  POSTGRES_DB: ${POSTGRES_DB:-jobhunter}
+  PROFILE_PATH: /app/config/profile.yml
+  LETTER_PATH: /app/config/letter.md
+  DRAFTS_DIR: /data/drafts
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_JSON: ${LOG_JSON:-true}
+  ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
+  ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
 
 services:
   db:
@@ -20,52 +43,96 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      # Exposed so you can point a SQL client at it. Drop this line if you
-      # would rather it stayed inside the compose network.
+      # Exposed for a local SQL client. Remove this line to keep the database
+      # reachable only from inside the compose network.
       - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jobhunter} -d ${POSTGRES_DB:-jobhunter}"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 12
 
-  api:
-    build:
-      context: ./api
-    restart: unless-stopped
+  # Applies migrations, then exits. Everything else waits for it.
+  migrate:
+    <<: *api-image
+    restart: "no"
     depends_on:
       db:
         condition: service_healthy
     environment:
-      POSTGRES_HOST: db
-      POSTGRES_USER: ${POSTGRES_USER:-jobhunter}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobhunter}
-      POSTGRES_DB: ${POSTGRES_DB:-jobhunter}
-      SWEEP_INTERVAL_MINUTES: ${SWEEP_INTERVAL_MINUTES:-60}
-      SWEEP_ON_STARTUP: ${SWEEP_ON_STARTUP:-true}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      PROFILE_PATH: /app/config/profile.yml
-      LETTER_PATH: /app/config/letter.md
-      DRAFTS_DIR: /data/drafts
-      ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
-      ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
+      <<: *api-env
     volumes:
-      # Read-only: the container should never rewrite your profile.
       - ./config:/app/config:ro
-      # Drafts are written here and stay on your machine.
+    command: ["alembic", "upgrade", "head"]
+    # The image's healthcheck probes the HTTP API, which this one-shot
+    # container never serves.
+    healthcheck:
+      disable: true
+
+  api:
+    <<: *api-image
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *api-env
+      # The API serves; the worker sweeps. Discovery is disabled here so a
+      # restart of the API never triggers an unscheduled crawl.
+      SWEEP_INTERVAL_MINUTES: 0
+      SWEEP_ON_STARTUP: "false"
+      CORS_ORIGINS: '["http://localhost:${WEB_PORT:-3000}"]'
+    volumes:
+      - ./config:/app/config:ro
       - ./data/drafts:/data/drafts
     ports:
       - "${API_PORT:-8000}:8000"
+
+  worker:
+    <<: *api-image
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *api-env
+      SWEEP_INTERVAL_MINUTES: ${SWEEP_INTERVAL_MINUTES:-60}
+      SWEEP_ON_STARTUP: ${SWEEP_ON_STARTUP:-true}
+      WORKER_NAME: ${WORKER_NAME:-worker-1}
+    volumes:
+      - ./config:/app/config:ro
+      - ./data/drafts:/data/drafts
+    command: ["python", "-m", "app.worker"]
+    # Safe to scale: every run takes a PostgreSQL advisory lock first, so a
+    # second worker skips rather than ingesting the same sweep twice.
+    #
+    # The worker serves no HTTP, so the image's API healthcheck is replaced
+    # with one that asks the real question: can it still reach the database?
+    healthcheck:
+      test: ["CMD", "python", "-c", "from app.db import wait_for_db; wait_for_db(attempts=2)"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
 
   web:
     build:
       context: ./web
       args:
-        # Inlined at build time, so it must be the URL your *browser* uses.
+        # Inlined at build time, so this must be the URL the *browser* uses.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     restart: unless-stopped
     depends_on:
       - api
+    environment:
+      # Server components render inside this container, so they reach the API
+      # by its service name. The browser uses NEXT_PUBLIC_API_URL above, which
+      # is baked in at build time and must be a host-reachable address.
+      API_INTERNAL_URL: http://api:8000
     ports:
       - "${WEB_PORT:-3000}:3000"
 

@@ -1,8 +1,15 @@
 """Runtime settings and the candidate profile.
 
-Settings come from the environment; the profile comes from a YAML file that is
-deliberately kept out of the repository. Splitting them this way means the code
-is publishable and the personal data is not.
+Two sources, deliberately separated:
+
+  * ``Settings`` comes from the environment -- connection strings, intervals,
+    optional API keys. Nothing here identifies a person.
+  * ``Profile`` comes from a YAML file that is gitignored, with a committed
+    example beside it. Name, contact details, skills and target employers live
+    there.
+
+That split is what makes the repository publishable while the deployment stays
+personal. Anything that would identify the candidate belongs in the profile.
 """
 
 from __future__ import annotations
@@ -21,30 +28,54 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # ---- database ----
     postgres_user: str = "jobhunter"
     postgres_password: str = "jobhunter"
     postgres_db: str = "jobhunter"
     postgres_host: str = "db"
     postgres_port: int = 5432
 
+    # ---- discovery ----
     sweep_interval_minutes: int = 60
     sweep_on_startup: bool = True
-    log_level: str = "INFO"
+    # Identifies the process in run records, so concurrent workers are
+    # distinguishable in the run history.
+    worker_name: str = "worker"
 
+    # ---- http ----
+    http_timeout: float = 30.0
+    http_max_retries: int = 3
+    http_backoff_seconds: float = 1.5
+    max_workers: int = 8
+    # Full-text fetches per run. Descriptions feed the language, salary and
+    # seniority parsers, but each one is a request, so only the strongest
+    # candidates are enriched.
+    max_enrich: int = 120
+    user_agent: str = (
+        "JobHunter/1.0 (+https://github.com/mzquadri/jobhunter) "
+        "personal job-search agent"
+    )
+
+    # ---- provider health ----
+    # Consecutive failures before a source is backed off, and for how long.
+    failures_before_backoff: int = 3
+    backoff_minutes: int = 180
+
+    # ---- paths ----
     profile_path: Path = REPO_ROOT / "config" / "profile.yml"
     letter_path: Path = REPO_ROOT / "config" / "letter.md"
     drafts_dir: Path = REPO_ROOT / "data" / "drafts"
 
+    # ---- optional integrations; all absent by default ----
     adzuna_app_id: str = ""
     adzuna_app_key: str = ""
 
-    http_timeout: float = 30.0
-    max_workers: int = 8
-    # Full-text fetches per sweep. Descriptions are what the warning flags read,
-    # but each one is a request, so only the best candidates are enriched.
-    max_enrich: int = 80
-
-    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+    # ---- api ----
+    log_level: str = "INFO"
+    log_json: bool = True
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    # Requests per minute per client for mutating endpoints.
+    rate_limit_per_minute: int = 120
 
     @property
     def database_url(self) -> str:
@@ -60,100 +91,175 @@ def get_settings() -> Settings:
 
 
 class Profile:
-    """The candidate profile, loaded from YAML.
+    """The candidate profile, read from YAML.
 
-    Thin wrappers rather than a deep model: the YAML is the source of truth and
-    is meant to be edited by hand, so the code reads it rather than mirroring
-    it in a schema that would have to be kept in step.
+    Thin accessors rather than a deep Pydantic model: the YAML is the source of
+    truth and is meant to be edited by hand, so the code reads it rather than
+    mirroring it in a schema that would have to be kept in step. Every accessor
+    supplies a safe default, so a partially filled profile still runs.
     """
 
     def __init__(self, raw: dict[str, Any]) -> None:
-        self.raw = raw
+        self.raw = raw or {}
 
-    # ---- candidate ------------------------------------------------------
+    def _section(self, name: str) -> dict[str, Any]:
+        value = self.raw.get(name)
+        return value if isinstance(value, dict) else {}
+
+    def _list(self, section: str, key: str) -> list[str]:
+        value = self._section(section).get(key) if section else self.raw.get(key)
+        return [str(x).lower() for x in value] if isinstance(value, list) else []
+
+    # ---- identity -------------------------------------------------------
     @property
     def candidate(self) -> dict[str, Any]:
-        return self.raw.get("candidate", {})
+        return self._section("candidate")
 
     @property
     def headline(self) -> str:
         c = self.candidate
-        return f"Full-time AI/ML · Germany, Switzerland, EU · from {c.get('available_from', 'now')}"
+        where = c.get("primary_city", "Europe")
+        return f"Full-time AI/ML · {where} first · available {c.get('available_from', 'now')}"
+
+    @property
+    def education_level(self) -> str:
+        return str(self.candidate.get("education_level", "msc")).lower()
+
+    @property
+    def german_level(self) -> str:
+        return str(self.candidate.get("german_level", "a2")).lower()
+
+    @property
+    def years_experience(self) -> float:
+        try:
+            return float(self.candidate.get("years_experience", 1.5))
+        except (TypeError, ValueError):
+            return 1.5
 
     # ---- search ---------------------------------------------------------
     @property
+    def search(self) -> dict[str, Any]:
+        return self._section("search")
+
+    @property
     def max_age_days(self) -> int:
-        return int(self.raw.get("search", {}).get("max_age_days", 14))
+        return int(self.search.get("max_age_days", 14))
+
+    @property
+    def archive_after_days(self) -> int:
+        return int(self.search.get("archive_after_days", 30))
 
     @property
     def min_score(self) -> int:
-        return int(self.raw.get("search", {}).get("min_score", 20))
+        return int(self.search.get("min_score", 25))
 
     @property
     def draft_min_score(self) -> int:
-        return int(self.raw.get("search", {}).get("draft_min_score", 55))
+        return int(self.search.get("draft_min_score", 60))
 
     @property
     def keep_undated(self) -> bool:
-        return bool(self.raw.get("search", {}).get("keep_undated", True))
+        return bool(self.search.get("keep_undated", True))
 
-    # ---- matching -------------------------------------------------------
+    @property
+    def target_salary_eur(self) -> int:
+        return int(self.search.get("target_salary_eur", 70000))
+
+    # ---- locations ------------------------------------------------------
     @property
     def location_tiers(self) -> dict[int, list[str]]:
-        tiers = self.raw.get("locations", {}).get("tiers", {})
+        tiers = self._section("locations").get("tiers", {})
+        if not isinstance(tiers, dict):
+            return {}
         return {int(k): [str(x).lower() for x in v] for k, v in tiers.items()}
 
     @property
     def location_exclude(self) -> list[str]:
-        return [str(x).lower() for x in self.raw.get("locations", {}).get("exclude", [])]
-
-    def _roles(self, key: str) -> list[str]:
-        return [str(x).lower() for x in self.raw.get("roles", {}).get(key, [])]
+        return self._list("locations", "exclude")
 
     @property
+    def country_map(self) -> dict[str, list[str]]:
+        """country code -> city/region terms that imply it."""
+        raw = self._section("locations").get("countries", {})
+        if not isinstance(raw, dict):
+            return {}
+        return {str(k).lower(): [str(x).lower() for x in v] for k, v in raw.items()}
+
+    # ---- roles ----------------------------------------------------------
+    @property
     def role_words(self) -> list[str]:
-        return self._roles("include")
+        return self._list("roles", "include")
 
     @property
     def too_senior(self) -> list[str]:
-        return self._roles("too_senior")
+        return self._list("roles", "too_senior")
 
     @property
     def not_fulltime(self) -> list[str]:
-        return self._roles("not_fulltime")
+        return self._list("roles", "not_fulltime")
 
     @property
-    def skills(self) -> list[str]:
-        return [str(x).lower() for x in self.raw.get("skills", [])]
+    def role_categories(self) -> dict[str, list[str]]:
+        raw = self._section("roles").get("categories", {})
+        if not isinstance(raw, dict):
+            return {}
+        return {str(k): [str(x).lower() for x in v] for k, v in raw.items()}
+
+    # ---- profile content ------------------------------------------------
+    @property
+    def skills(self) -> dict[str, list[str]]:
+        """Skill group -> terms. Groups let the matcher say *why* something
+        matched ("strong PyTorch match") rather than counting keywords."""
+        raw = self.raw.get("skills", {})
+        if isinstance(raw, list):                       # tolerate a flat list
+            return {"general": [str(x).lower() for x in raw]}
+        if not isinstance(raw, dict):
+            return {}
+        return {str(k): [str(x).lower() for x in v] for k, v in raw.items()}
+
+    @property
+    def all_skills(self) -> list[str]:
+        return sorted({s for group in self.skills.values() for s in group})
 
     @property
     def domains(self) -> list[str]:
-        return [str(x).lower() for x in self.raw.get("domains", [])]
+        value = self.raw.get("domains")
+        return [str(x).lower() for x in value] if isinstance(value, list) else []
 
     @property
-    def scoring(self) -> dict[str, Any]:
-        return self.raw.get("scoring", {})
+    def preferred_industries(self) -> list[str]:
+        value = self.raw.get("preferred_industries")
+        return [str(x).lower() for x in value] if isinstance(value, list) else []
+
+    # ---- scoring --------------------------------------------------------
+    @property
+    def weights(self) -> dict[str, Any]:
+        return self._section("scoring")
 
     @property
     def flags(self) -> list[dict[str, Any]]:
-        return self.raw.get("flags", [])
+        value = self.raw.get("flags")
+        return value if isinstance(value, list) else []
 
     # ---- sources --------------------------------------------------------
     @property
     def companies(self) -> list[dict[str, Any]]:
-        return self.raw.get("companies", [])
+        value = self.raw.get("companies")
+        return value if isinstance(value, list) else []
 
     @property
     def company_queries(self) -> list[str]:
-        return self.raw.get("company_queries", ["machine learning"])
+        value = self.raw.get("company_queries")
+        return [str(x) for x in value] if isinstance(value, list) else ["machine learning"]
 
     @property
     def boards(self) -> dict[str, Any]:
-        return self.raw.get("boards", {})
+        return self._section("boards")
 
     @property
-    def watchlist(self) -> list[dict[str, str]]:
-        return self.raw.get("watchlist", [])
+    def saved_searches(self) -> list[dict[str, Any]]:
+        value = self.raw.get("saved_searches")
+        return value if isinstance(value, list) else []
 
 
 @lru_cache
@@ -167,3 +273,10 @@ def get_profile() -> Profile:
         )
     with path.open(encoding="utf-8") as fh:
         return Profile(yaml.safe_load(fh) or {})
+
+
+def reload_profile() -> Profile:
+    """Drop the cached profile so an edited YAML takes effect without a
+    container restart."""
+    get_profile.cache_clear()
+    return get_profile()

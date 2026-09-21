@@ -1,12 +1,11 @@
 # ---------------------------------------------------------------------------
 # JobHunter profile
 #
-# Copy this file to config/profile.yml and make it yours. profile.yml is
-# gitignored, so your name, contact details and search history never reach the
-# repository.
+# Copy to config/profile.yml and make it yours. That file is gitignored, so
+# your name, contact details and search history never reach the repository.
 #
-# Everything the collector does is driven from here. Adding a company is one
-# line; there is no code to change.
+# Everything discovery and ranking do is driven from here. Adding an employer
+# is one line; there is no code to change.
 # ---------------------------------------------------------------------------
 
 candidate:
@@ -14,57 +13,64 @@ candidate:
   email: you@example.com
   phone: "+49 000 0000000"
   city: Munich, Germany
-  # Free text. Appears in the dashboard header and in generated cover letters.
-  available_from: May 2026
-  languages:
-    german: A2, working toward B1
+  primary_city: Munich
+  available_from: immediately
+  # msc | bsc | phd — compared against what a posting asks for.
+  education_level: msc
+  # Your German, in CEFR terms. Drives the language sub-score.
+  german_level: a2
+  # Including working-student and internship time. Used for the experience
+  # sub-score, not as a hard filter.
+  years_experience: 1.5
 
 search:
   # Postings older than this never reach the dashboard. On engineering roles
   # the applications that land in the first days are the ones that get read.
   max_age_days: 14
-  # Below this score a posting is noise.
-  min_score: 20
-  # Only build a cover-letter draft for matches at least this strong.
-  draft_min_score: 55
-  # Keep postings whose source gave no date at all.
+  # A job no longer found by any source is archived rather than deleted, so
+  # reposting patterns stay visible.
+  archive_after_days: 30
+  min_score: 25
+  draft_min_score: 60
   keep_undated: true
+  # A preference, never a filter: a role with no stated salary is still shown.
+  target_salary_eur: 70000
 
 # ---------------------------------------------------------------------------
-# Where you want to work, best first. Location is weighted heavily on purpose:
-# a perfect role in the wrong country is worth nothing.
+# Geography. Weighted heavily on purpose: a perfect role in the wrong country
+# is worth nothing, and without this the scorer will happily rank one first.
 # ---------------------------------------------------------------------------
 locations:
   tiers:
-    22: [munich, münchen, muenchen, garching, ingolstadt, bavaria, bayern]
-    18: [germany, deutschland, deu, berlin, hamburg, stuttgart, frankfurt,
+    24: [munich, münchen, muenchen, garching, ingolstadt, bavaria, bayern]
+    20: [germany, deutschland, deu, berlin, hamburg, stuttgart, frankfurt,
          cologne, köln, koeln, düsseldorf, duesseldorf, dresden, leipzig,
          nuremberg, nürnberg, nuernberg, karlsruhe, aachen, bremen, hannover,
          ulm, bonn, essen, dortmund, mannheim, friedrichshafen, erlangen,
-         regensburg, wolfsburg]
-    16: [switzerland, schweiz, zurich, zürich, basel, bern, geneva, genf,
+         regensburg, wolfsburg, darmstadt, heidelberg, augsburg]
+    17: [switzerland, schweiz, zurich, zürich, basel, bern, geneva, genf,
          lausanne, zug, lucerne, luzern, winterthur, che]
-    14: [austria, österreich, oesterreich, vienna, wien, graz, linz, salzburg,
+    15: [austria, österreich, oesterreich, vienna, wien, graz, linz, salzburg,
          innsbruck]
-    11: [netherlands, amsterdam, eindhoven, delft, rotterdam, utrecht, denmark,
-         copenhagen, sweden, stockholm, gothenburg, luxembourg, ireland,
-         dublin, belgium, brussels, leuven]
-    8:  [france, paris, toulouse, grenoble, italy, milan, milano, turin, torino,
-         modena, bologna, maranello, spain, madrid, barcelona, norway, oslo,
-         finland, helsinki, prague, czech, poland, warsaw, krakow, portugal,
-         lisbon]
-    5:  [dubai, abu dhabi, uae, united arab emirates, doha, qatar,
-         united kingdom, london, cambridge, oxford, bristol]
+    13: [netherlands, amsterdam, eindhoven, delft, rotterdam, utrecht,
+         the hague, den haag]
+    10: [denmark, copenhagen, sweden, stockholm, gothenburg, luxembourg,
+         ireland, dublin, belgium, brussels, leuven, helsinki, finland]
+    7:  [france, paris, toulouse, grenoble, italy, milan, milano, turin,
+         torino, modena, bologna, maranello, spain, madrid, barcelona,
+         norway, oslo, prague, czech, poland, warsaw, krakow, portugal, lisbon]
+    4:  [united kingdom, london, cambridge, oxford, bristol, dubai, abu dhabi,
+         uae, united arab emirates, doha, qatar]
 
-  # Hard reject. A posting that clearly names one of these is dropped, because
-  # it is not a job you could take. A posting with no location is kept.
+  # Hard reject. A posting clearly in one of these is dropped; it is not a job
+  # that can be taken. A posting with no location at all is kept.
   exclude:
     [india, bangalore, bengaluru, hyderabad, pune, chennai, mumbai, gurgaon,
      gurugram, noida, new delhi, kolkata, ahmedabad, coimbatore,
      united states, usa, san jose, sunnyvale, san francisco, new york,
      washington, california, texas, seattle, boston, chicago, atlanta, detroit,
      austin, denver, michigan, ohio, north carolina, new jersey, pennsylvania,
-     florida, arizona,
+     florida, arizona, oregon, utah, georgia,
      china, shanghai, beijing, shenzhen, suzhou, chengdu, wuhan,
      japan, tokyo, osaka, yokohama,
      singapore, malaysia, kuala lumpur, thailand, bangkok, vietnam, hanoi,
@@ -77,181 +83,316 @@ locations:
      turkey, istanbul, israel, tel aviv,
      south korea, seoul, taiwan, taipei, hong kong, russia, moscow]
 
+  # Country filters in the dashboard resolve through this map.
+  countries:
+    de: [germany, deutschland, deu, munich, münchen, berlin, hamburg, stuttgart,
+         frankfurt, cologne, köln, düsseldorf, dresden, leipzig, nuremberg,
+         nürnberg, karlsruhe, aachen, bremen, hannover, ulm, bonn, ingolstadt,
+         garching, bavaria, bayern, erlangen, regensburg, wolfsburg, darmstadt]
+    ch: [switzerland, schweiz, che, zurich, zürich, basel, bern, geneva, genf,
+         lausanne, zug, lucerne, luzern, winterthur, baden, aargau]
+    at: [austria, österreich, vienna, wien, graz, linz, salzburg, innsbruck]
+    nl: [netherlands, amsterdam, eindhoven, delft, rotterdam, utrecht,
+         the hague, den haag]
+    eu: [france, paris, italy, milan, spain, madrid, barcelona, portugal,
+         lisbon, poland, warsaw, czech, prague, denmark, copenhagen, sweden,
+         stockholm, belgium, brussels, ireland, dublin, luxembourg, finland,
+         helsinki, norway, oslo]
+
 # ---------------------------------------------------------------------------
-# What counts as a job for you
+# What counts as a job
 # ---------------------------------------------------------------------------
 roles:
-  # A posting needs one of these in its title or it is not your field.
+  # A posting needs one of these in its title, or it is not the right field.
   include:
     ["machine learning", "deep learning", "artificial intelligence",
-     "ai engineer", "ai/ml", "ml engineer", mlops, "data scientist",
-     "data science", "research engineer", "research scientist",
-     "applied scientist", "computer vision", nlp, "natural language",
-     "generative ai", genai, llm, "data engineer", "algorithm engineer",
-     "algorithm developer", "simulation engineer", "software engineer ai",
-     "ki-ingenieur", datenwissenschaftler, "machine-learning", predictive,
-     "analytics engineer"]
+     "ai engineer", "ai/ml", "ml engineer", "mlops", "ml platform",
+     "ai platform", "data scientist", "data science", "research engineer",
+     "research scientist", "applied scientist", "computer vision",
+     "nlp", "natural language", "generative ai", "genai", "llm", "rag",
+     "data engineer", "algorithm engineer", "algorithm developer",
+     "simulation engineer", "perception engineer", "robotics engineer",
+     "autonomous systems", "ki-ingenieur", "datenwissenschaftler",
+     "machine-learning", "scientific computing", "ai backend",
+     "ai software engineer", "python engineer", "analytics engineer",
+     "ml infrastructure", "data infrastructure"]
 
-  # Seniority you cannot apply to yet.
+  # Levels a recent graduate cannot realistically apply to. These are not
+  # rejected outright -- §11 asks for a major score penalty and continued
+  # searchability -- but they sink to the bottom.
   too_senior:
-    [senior, "sr.", "staff ", principal, "lead ", "team lead", teamlead,
-     "head of", director, "vp ", "vice president", chief, manager, "expert ",
-     architect, professor, postdoc, "post-doc", fellow, "10+ years", "8+ years",
-     "7+ years", abteilungsleiter, gruppenleiter, referatsleiter,
-     "principal scientist"]
+    ["senior", "sr.", "staff ", "principal", "lead ", "team lead", "teamlead",
+     "head of", "director", "vp ", "vice president", "chief", "expert ",
+     "architect", "professor", "postdoc", "post-doc", "fellow",
+     "abteilungsleiter", "gruppenleiter", "referatsleiter"]
 
-  # Not a full-time job. "graduate programme", "trainee" and "entry level" are
-  # deliberately absent -- those are real jobs and exactly what to apply for.
+  # Not a full-time job. "graduate programme", "trainee" and "entry level"
+  # are deliberately absent -- those are real jobs and exactly the target.
   not_fulltime:
-    [intern, internship, praktikum, praktikant, praktikantin, werkstudent,
-     "working student", studentische, "student assistant", hiwi, thesis,
-     abschlussarbeit, masterarbeit, bachelorarbeit, ausbildung, apprentice,
-     azubi, "duales studium", "dual student", volunteer, ehrenamt,
-     "part-time", teilzeit, minijob, phd, "ph.d", doctoral, doktorand,
-     promotion, placement, "industrial placement", "sandwich year", "gap year",
-     vie, "v.i.e", "co-op", "coop student", "summer programme", scholarship,
-     stipendium, fellowship, bursary]
+    ["intern", "internship", "praktikum", "praktikant", "praktikantin",
+     "werkstudent", "working student", "studentische", "student assistant",
+     "hiwi", "thesis", "abschlussarbeit", "masterarbeit", "bachelorarbeit",
+     "ausbildung", "apprentice", "azubi", "duales studium", "dual student",
+     "volunteer", "ehrenamt", "part-time", "teilzeit", "minijob",
+     "phd", "ph.d", "doctoral", "doktorand", "promotion", "placement",
+     "industrial placement", "sandwich year", "gap year", "vie", "v.i.e",
+     "co-op", "coop student", "summer programme", "scholarship", "stipendium",
+     "fellowship", "bursary", "freelance", "contractor", "interim"]
 
-# Skills from your CV. Each hit scores points and picks cover-letter paragraphs.
+  # Used to group the dashboard and to explain what kind of role a posting is.
+  categories:
+    "Machine Learning": ["machine learning", "ml engineer", "deep learning",
+                         "applied scientist", "machine-learning"]
+    "Computer Vision": ["computer vision", "perception", "image processing",
+                        "visual recognition"]
+    "NLP & LLM": ["nlp", "natural language", "llm", "large language model",
+                  "rag", "generative ai", "genai", "conversational ai"]
+    "MLOps & Platform": ["mlops", "ml platform", "ai platform",
+                         "ml infrastructure", "model deployment"]
+    "Data Science": ["data scientist", "data science", "analytics engineer",
+                     "statistician"]
+    "Data Engineering": ["data engineer", "data infrastructure", "etl",
+                         "data pipeline"]
+    "Research": ["research engineer", "research scientist", "scientific computing",
+                 "scientific machine learning"]
+    "Robotics & Autonomy": ["robotics", "autonomous systems", "autonomous driving",
+                            "motion planning", "slam"]
+    "Simulation": ["simulation engineer", "surrogate", "digital twin",
+                   "physics-informed"]
+
+# ---------------------------------------------------------------------------
+# Skills, grouped. Groups are what let the matcher say "strong PyTorch and
+# deep-learning match" instead of "11 keywords hit".
+# ---------------------------------------------------------------------------
 skills:
-  [pytorch, tensorflow, "scikit-learn", xgboost, "hugging face", transformers,
-   "graph neural", gnn, uncertainty, bayesian, conformal, calibration, rag,
-   "retrieval-augmented", embedding, "vector database", qdrant,
-   "knowledge graph", neo4j, llm, ollama, "fine-tuning", lora, fastapi, kafka,
-   docker, kubernetes, postgresql, mongodb, mlflow, "weights & biases", "ci/cd",
-   python, sql, matlab, numpy, pandas, spark, airflow, "computer vision",
-   "grad-cam", ocr, "time series", forecasting, surrogate, "digital twin",
-   "physics-informed", optimization]
+  core_ml: [pytorch, tensorflow, scikit-learn, xgboost, keras, jax,
+            deep learning, machine learning, neural network, transformer,
+            "hugging face", transformers]
+  research: ["graph neural", gnn, uncertainty, bayesian, conformal,
+             calibration, "uncertainty quantification", "probabilistic",
+             "physics-informed", surrogate, "digital twin"]
+  genai: [llm, rag, "retrieval-augmented", embedding, "vector database",
+          qdrant, "knowledge graph", neo4j, ollama, "fine-tuning", lora,
+          peft, langchain, "prompt engineering", "semantic search"]
+  vision: ["computer vision", opencv, "image segmentation", "object detection",
+           "grad-cam", cnn, "convolutional", ocr]
+  backend: [fastapi, python, "rest api", django, flask, sql, postgresql,
+            mongodb, redis, "spring boot", java, typescript]
+  mlops: [docker, kubernetes, "ci/cd", mlflow, "weights & biases", airflow,
+          kafka, terraform, "github actions", prometheus, grafana, minio]
+  data: [pandas, numpy, spark, "data pipeline", etl, dbt, "time series",
+         forecasting, "feature engineering"]
 
-# Industries you want.
 domains:
   [automotive, vehicle, car, mobility, autonomous, adas, aerospace, aviation,
    aircraft, airline, space, satellite, rocket, defence, defense, propulsion,
    turbine, medical, healthcare, imaging, radiology, pharma, clinical,
    simulation, traffic, transport, manufacturing, robotics, energy, battery,
-   insurance, legal, finance, reinsurance]
+   insurance, legal, finance, reinsurance, climate, semiconductor, telecom]
+
+preferred_industries:
+  [automotive, mobility, aerospace, aviation, technology, "industrial ai",
+   robotics, "healthcare ai", "deep tech", research, "enterprise ai"]
 
 # ---------------------------------------------------------------------------
-# Scoring weights
+# Scoring. Sub-scores are each 0-100; weights decide how much each contributes
+# to the headline number. They must sum to 1.0.
 # ---------------------------------------------------------------------------
 scoring:
-  dream: 25
-  priority: 12
-  skill_each: 5
-  skill_cap: 24
-  domain_each: 4
-  domain_cap: 12
-  entry_bonus: 8
-  # (max age in days, points). The first 48 hours matter more than anything
-  # else on this list, so the curve is steep rather than a polite bonus.
-  freshness: [[2, 25], [5, 18], [9, 10], [14, 4]]
+  weights:
+    technical: 0.26
+    location: 0.20
+    freshness: 0.16
+    experience: 0.15
+    language: 0.13
+    domain: 0.06
+    education: 0.04
+
+  # Added after the weighted sum, so a dream employer lifts a good match
+  # rather than rescuing a bad one.
+  tier_bonus:
+    dream: 10
+    high: 5
+    normal: 0
+
+  # Subtracted when the posting asks for a level well beyond a recent MSc.
+  seniority_penalty:
+    senior: 30
+    lead: 45
+    executive: 60
+
+  # Freshness curve: (max age in days, sub-score). The first 48 hours matter
+  # more than anything else, so it is steep rather than a polite bonus.
+  freshness_curve: [[1, 100], [3, 92], [7, 75], [14, 45], [30, 15]]
 
 # Warnings. These never reject a posting -- keyword detection is imperfect --
-# but a role that probably needs EU citizenship should not outrank one you can
-# actually take.
+# but they subtract from the headline score so a role that cannot be taken does
+# not outrank one that can.
 flags:
-  - code: DEUTSCH
-    penalty: 10
-    explain: Needs strong German
-    phrases: ["fließend deutsch", "fliessend deutsch", verhandlungssicher,
-              "sehr gute deutschkenntnisse", "deutsch c1", "deutsch c2",
-              "muttersprache deutsch", "german native", "fluent german",
-              "german c1", "german is required"]
   - code: EU-ONLY
-    penalty: 18
+    penalty: 20
     explain: May require EU citizenship or security clearance
     phrases: ["eu citizenship", "eu national", "security clearance",
               "citizenship required", "nationality requirement",
-              "sicherheitsüberprüfung", "eu citizens only", itar]
+              "sicherheitsüberprüfung", "eu citizens only", "itar",
+              "must be a citizen"]
   - code: NO-VISA
-    penalty: 18
+    penalty: 20
     explain: States that visa sponsorship is not available
     phrases: ["no sponsorship", "without sponsorship", "not sponsor",
               "must have the right to work", "existing work authorization",
-              "keine visa", "cannot sponsor"]
+              "keine visa", "cannot sponsor", "no visa support"]
+  - code: CLEARANCE
+    penalty: 15
+    explain: Requires a security clearance
+    phrases: ["security clearance", "sicherheitsüberprüfung", "nato clearance",
+              "geheimschutz"]
 
 # ---------------------------------------------------------------------------
-# Companies. adapter is one of: workday | smartrecruiters | sf_rss |
-# greenhouse | lever.  tier is DREAM | PRIORITY | NORMAL.
+# Employers.
 #
-# Which adapter a company uses is visible in its careers URL:
-#   *.myworkdayjobs.com          -> workday, arg "tenant|wdN|CareerSiteName"
-#   *.smartrecruiters.com        -> smartrecruiters, arg is the company slug
-#   jobs.<company>.com           -> sf_rss, arg is that hostname
-#   boards.greenhouse.io/<slug>  -> greenhouse, arg is the slug
-#   jobs.lever.co/<slug>         -> lever, arg is the slug
+#   adapter: workday | smartrecruiters | successfactors | greenhouse | lever
+#            | ashby | personio | workable
+#   tier:    dream | high | normal | ignored
+#
+# Leave `adapter` out entirely for an employer with no machine-readable
+# endpoint. It still appears in the dashboard as a one-click link -- saying
+# "this one cannot be automated" beats omitting the employer silently.
+#
+# Which adapter an employer uses is visible in its careers URL:
+#   *.myworkdayjobs.com          -> workday,         arg "tenant|wdN|SiteName"
+#   *.smartrecruiters.com        -> smartrecruiters, arg company slug
+#   jobs.<company>.com           -> successfactors,  arg that hostname
+#   boards.greenhouse.io/<slug>  -> greenhouse,      arg the slug
+#   jobs.lever.co/<slug>         -> lever,           arg the slug
+#   jobs.ashbyhq.com/<slug>      -> ashby,           arg the slug
+#   <slug>.jobs.personio.de      -> personio,        arg the slug
+#   apply.workable.com/<slug>    -> workable,        arg the slug
+#
+# Every entry below was verified against its live endpoint on 21 Sep 2026.
 # ---------------------------------------------------------------------------
 companies:
-  # aerospace and aviation
-  - {name: Airbus,           adapter: workday,         arg: "ag|wd3|Airbus",                tier: DREAM}
-  - {name: MTU Aero Engines, adapter: sf_rss,          arg: jobs.mtu.de,                    tier: DREAM}
-  - {name: DLR (Aerospace),  adapter: sf_rss,          arg: jobs.dlr.de,                    tier: PRIORITY}
-  - {name: Thales,           adapter: workday,         arg: "thales|wd3|Careers",           tier: PRIORITY}
-  - {name: Isar Aerospace,   adapter: greenhouse,      arg: isaraerospace,                  tier: DREAM}
-  - {name: Helsing,          adapter: greenhouse,      arg: helsing,                        tier: PRIORITY}
-  - {name: Etihad Airways,   adapter: smartrecruiters, arg: EtihadAirways5,                 tier: DREAM}
+  # ---- aerospace and aviation ----
+  - {name: Airbus,            adapter: workday,         arg: "ag|wd3|Airbus",                 tier: dream,  industry: aerospace}
+  - {name: MTU Aero Engines,  adapter: successfactors,  arg: jobs.mtu.de,                     tier: dream,  industry: aerospace}
+  - {name: DLR,               adapter: successfactors,  arg: jobs.dlr.de,                     tier: high,   industry: aerospace}
+  - {name: Thales,            adapter: workday,         arg: "thales|wd3|Careers",            tier: high,   industry: aerospace}
+  - {name: Isar Aerospace,    adapter: greenhouse,      arg: isaraerospace,                   tier: dream,  industry: aerospace}
+  - {name: Helsing,           adapter: greenhouse,      arg: helsing,                         tier: high,   industry: defence}
+  - {name: Etihad Airways,    adapter: smartrecruiters, arg: EtihadAirways5,                  tier: dream,  industry: aviation}
 
-  # automotive
-  - {name: BMW Group,        adapter: sf_rss,          arg: jobs.bmwgroup.com,              tier: DREAM}
-  - {name: Bosch,            adapter: smartrecruiters, arg: BoschGroup,                     tier: PRIORITY}
-  - {name: Continental,      adapter: smartrecruiters, arg: Continental,                    tier: PRIORITY}
-  - {name: Schaeffler,       adapter: sf_rss,          arg: jobs.schaeffler.com,            tier: NORMAL}
-  - {name: Wayve,            adapter: greenhouse,      arg: wayve,                          tier: PRIORITY}
-  - {name: Nuro,             adapter: greenhouse,      arg: nuro,                           tier: NORMAL}
-  - {name: KONUX,            adapter: greenhouse,      arg: konux,                          tier: NORMAL}
+  # ---- automotive ----
+  - {name: BMW Group,         adapter: successfactors,  arg: jobs.bmwgroup.com,               tier: dream,  industry: automotive}
+  - {name: ZF Group,          adapter: successfactors,  arg: jobs.zf.com,                     tier: high,   industry: automotive}
+  - {name: MAN Truck & Bus,   adapter: successfactors,  arg: jobs.man.eu,                     tier: high,   industry: automotive}
+  - {name: TRATON Group,      adapter: successfactors,  arg: jobs.traton.com,                 tier: high,   industry: automotive}
+  - {name: Scania,            adapter: successfactors,  arg: jobs.scania.com,                 tier: normal, industry: automotive}
+  - {name: Bosch,             adapter: smartrecruiters, arg: BoschGroup,                      tier: high,   industry: automotive}
+  - {name: Continental,       adapter: smartrecruiters, arg: Continental,                     tier: high,   industry: automotive}
+  - {name: Schaeffler,        adapter: successfactors,  arg: jobs.schaeffler.com,             tier: normal, industry: automotive}
+  - {name: Wayve,             adapter: greenhouse,      arg: wayve,                           tier: high,   industry: autonomous}
+  - {name: Nuro,              adapter: greenhouse,      arg: nuro,                            tier: normal, industry: autonomous}
+  - {name: KONUX,             adapter: greenhouse,      arg: konux,                           tier: normal, industry: mobility}
 
-  # Switzerland
-  - {name: ABB,              adapter: workday,         arg: "abb|wd3|External_Career_Page", tier: PRIORITY}
-  - {name: Roche,            adapter: workday,         arg: "roche|wd3|roche-ext",          tier: PRIORITY}
-  - {name: Novartis,         adapter: workday,         arg: "novartis|wd3|Novartis_Careers", tier: NORMAL}
-  - {name: Swiss Re,         adapter: sf_rss,          arg: careers.swissre.com,            tier: PRIORITY}
-  - {name: Logitech,         adapter: workday,         arg: "logitech|wd5|Logitech",        tier: NORMAL}
+  # ---- Switzerland ----
+  - {name: ABB,               adapter: workday,         arg: "abb|wd3|External_Career_Page",  tier: high,   industry: industrial}
+  - {name: Roche,             adapter: workday,         arg: "roche|wd3|roche-ext",           tier: high,   industry: healthcare}
+  - {name: Novartis,          adapter: workday,         arg: "novartis|wd3|Novartis_Careers", tier: normal, industry: healthcare}
+  - {name: Swiss Re,          adapter: successfactors,  arg: careers.swissre.com,             tier: high,   industry: insurance}
+  - {name: Logitech,          adapter: workday,         arg: "logitech|wd5|Logitech",         tier: normal, industry: technology}
 
-  # technology
-  - {name: SAP,              adapter: sf_rss,          arg: jobs.sap.com,                   tier: PRIORITY}
-  - {name: Philips,          adapter: workday,         arg: "philips|wd3|jobs-and-careers", tier: NORMAL}
-  - {name: Celonis,          adapter: greenhouse,      arg: celonis,                        tier: PRIORITY}
-  - {name: Parloa,           adapter: greenhouse,      arg: parloa,                         tier: NORMAL}
-  - {name: SumUp,            adapter: greenhouse,      arg: sumup,                          tier: NORMAL}
-  - {name: GetYourGuide,     adapter: greenhouse,      arg: getyourguide,                   tier: NORMAL}
-  - {name: Novo Nordisk,     adapter: sf_rss,          arg: careers.novonordisk.com,        tier: NORMAL}
-  - {name: TU Delft,         adapter: sf_rss,          arg: careers.tudelft.nl,             tier: NORMAL}
+  # ---- technology, industrial and research ----
+  - {name: SAP,               adapter: successfactors,  arg: jobs.sap.com,                    tier: high,   industry: technology}
+  - {name: Philips,           adapter: workday,         arg: "philips|wd3|jobs-and-careers",  tier: normal, industry: healthcare}
+  - {name: Accenture,         adapter: workday,         arg: "accenture|wd103|AccentureCareers", tier: normal, industry: consulting}
+  - {name: Celonis,           adapter: greenhouse,      arg: celonis,                         tier: high,   industry: technology}
+  - {name: Parloa,            adapter: ashby,           arg: parloa,                          tier: normal, industry: technology}
+  - {name: DeepL,             adapter: ashby,           arg: deepl,                           tier: high,   industry: technology}
+  - {name: Cohere,            adapter: ashby,           arg: cohere,                          tier: normal, industry: technology}
+  - {name: Synthesia,         adapter: ashby,           arg: synthesia,                       tier: normal, industry: technology}
+  - {name: Anthropic,         adapter: greenhouse,      arg: anthropic,                       tier: high,   industry: technology}
+  - {name: Databricks,        adapter: greenhouse,      arg: databricks,                      tier: high,   industry: technology}
+  - {name: Figma,             adapter: greenhouse,      arg: figma,                           tier: normal, industry: technology}
+  - {name: N26,               adapter: greenhouse,      arg: n26,                             tier: normal, industry: fintech}
+  - {name: HelloFresh,        adapter: greenhouse,      arg: hellofresh,                      tier: normal, industry: technology}
+  - {name: SumUp,             adapter: greenhouse,      arg: sumup,                           tier: normal, industry: fintech}
+  - {name: GetYourGuide,      adapter: greenhouse,      arg: getyourguide,                    tier: normal, industry: technology}
+  - {name: Agile Robots,      adapter: workable,        arg: agile-robots,                    tier: normal, industry: robotics}
+  - {name: ProGlove,          adapter: personio,        arg: proglove,                        tier: normal, industry: industrial}
+  - {name: Wandelbots,        adapter: personio,        arg: wandelbots,                      tier: normal, industry: robotics}
+  - {name: Novo Nordisk,      adapter: successfactors,  arg: careers.novonordisk.com,         tier: normal, industry: healthcare}
+  - {name: TU Delft,          adapter: successfactors,  arg: careers.tudelft.nl,              tier: normal, industry: research}
 
-# Sent to each company's own search, so large employers return your field
+  # ---- watchlist: no public endpoint, checked by hand ----
+  # These render their listings with JavaScript and publish no open feed.
+  # Probed 21 Sep 2026; re-probe before assuming any of them can be automated.
+  - {name: Ferrari,            tier: dream,  industry: automotive, careers_url: "https://corporate.ferrari.com/en/careers"}
+  - {name: Lamborghini,        tier: dream,  industry: automotive, careers_url: "https://www.lamborghini.com/en-en/company/careers"}
+  - {name: Porsche,            tier: dream,  industry: automotive, careers_url: "https://jobs.porsche.com/"}
+  - {name: Audi,               tier: dream,  industry: automotive, careers_url: "https://www.audi.com/en/company/jobs.html"}
+  - {name: Volkswagen Group,   tier: high,   industry: automotive, careers_url: "https://jobs.volkswagengroup.com/"}
+  - {name: Mercedes-Benz,      tier: dream,  industry: automotive, careers_url: "https://group.mercedes-benz.com/careers/job-search/"}
+  - {name: Emirates Group,     tier: dream,  industry: aviation,   careers_url: "https://www.emiratesgroupcareers.com/search-and-apply/"}
+  - {name: Qatar Airways,      tier: normal, industry: aviation,   careers_url: "https://careers.qatarairways.com/"}
+  - {name: Lufthansa Group,    tier: high,   industry: aviation,   careers_url: "https://www.be-lufthansa.com/en/"}
+  - {name: Rolls-Royce,        tier: normal, industry: aerospace,  careers_url: "https://careers.rolls-royce.com/"}
+  - {name: Deutsche Aircraft,  tier: normal, industry: aerospace,  careers_url: "https://www.deutscheaircraft.com/careers"}
+  - {name: Siemens,            tier: high,   industry: technology, careers_url: "https://jobs.siemens.com/careers"}
+  - {name: Siemens Healthineers, tier: high, industry: healthcare, careers_url: "https://jobs.siemens-healthineers.com/careers"}
+  - {name: ZEISS,              tier: high,   industry: technology, careers_url: "https://www.zeiss.com/corporate/en/careers/job-search.html"}
+  - {name: Infineon,           tier: high,   industry: semiconductor, careers_url: "https://www.infineon.com/cms/en/careers/"}
+  - {name: Rohde & Schwarz,    tier: normal, industry: technology, careers_url: "https://www.rohde-schwarz.com/careers/career_252.html"}
+  - {name: Allianz,            tier: normal, industry: insurance,  careers_url: "https://careers.allianz.com/"}
+  - {name: Munich Re,          tier: normal, industry: insurance,  careers_url: "https://www.munichre.com/en/careers.html"}
+  - {name: NVIDIA,             tier: high,   industry: technology, careers_url: "https://www.nvidia.com/en-us/about-nvidia/careers/"}
+  - {name: Rimac / Bugatti,    tier: dream,  industry: automotive, careers_url: "https://www.rimac-group.com/careers/"}
+
+# Sent to each employer's own search, so large ones return the right field
 # rather than an arbitrary first page of whatever they have open.
 company_queries:
   ["machine learning", "data scientist", "artificial intelligence",
    "deep learning", "data engineer"]
 
 # ---------------------------------------------------------------------------
-# Company-independent job boards
+# Company-independent boards
 # ---------------------------------------------------------------------------
 boards:
   enabled: [arbeitnow, jobsch]
-  # 250 postings per page, newest first.
-  arbeitnow_pages: 4
+  arbeitnow_pages: 4        # 250 postings per page, newest first
   queries:
     ["machine learning engineer", "ai engineer", "data scientist",
-     "deep learning", "mlops engineer", "computer vision engineer"]
+     "deep learning", "mlops engineer", "computer vision engineer",
+     "research engineer", "llm engineer"]
   adzuna_countries: [de, ch, at, nl]
 
-# LinkedIn and Indeed are deliberately absent. Both block automated access, and
-# LinkedIn automation risks a permanent account ban.
+# LinkedIn and Indeed are deliberately absent: both block automated access,
+# and LinkedIn automation risks a permanent account ban.
 
 # ---------------------------------------------------------------------------
-# No public endpoint: these render their listings with JavaScript. The
-# dashboard shows them as one-click links instead of pretending otherwise.
+# Saved searches, seeded on first boot. Yours are never overwritten.
 # ---------------------------------------------------------------------------
-watchlist:
-  - {name: Ferrari,          url: "https://corporate.ferrari.com/en/careers"}
-  - {name: Lamborghini,      url: "https://www.lamborghini.com/en-en/company/careers"}
-  - {name: Audi,             url: "https://www.audi.com/en/company/jobs.html"}
-  - {name: Porsche,          url: "https://jobs.porsche.com/"}
-  - {name: Volkswagen Group, url: "https://jobs.volkswagengroup.com/"}
-  - {name: Mercedes-Benz,    url: "https://group.mercedes-benz.com/careers/job-search/"}
-  - {name: Emirates Group,   url: "https://www.emiratesgroupcareers.com/search-and-apply/"}
-  - {name: Siemens,          url: "https://jobs.siemens.com/careers"}
-  - {name: ZEISS,            url: "https://www.zeiss.com/corporate/en/careers/job-search.html"}
-  - {name: Rolls-Royce,      url: "https://careers.rolls-royce.com/"}
-  - {name: Rimac / Bugatti,  url: "https://www.rimac-group.com/careers/"}
-  - {name: Qatar Airways,    url: "https://careers.qatarairways.com/"}
+saved_searches:
+  - {name: "Munich AI", description: "Anything AI/ML in and around Munich",
+     query: {country: de, q: munich, sort: newest}, pinned: true}
+  - {name: "Germany ML", description: "Machine learning across Germany",
+     query: {country: de, sort: score}, pinned: true}
+  - {name: "Switzerland", description: "Swiss roles, strongest first",
+     query: {country: ch, sort: score}}
+  - {name: "Dream employers", description: "Only the shortlist",
+     query: {tier: dream, sort: newest}, pinned: true}
+  - {name: "English only", description: "No German requirement at all",
+     query: {language: english_only, sort: score}}
+  - {name: "Aerospace", description: "Aerospace and aviation",
+     query: {domain: aerospace, sort: newest}}
+  - {name: "Automotive AI", description: "Automotive and autonomous systems",
+     query: {domain: automotive, sort: newest}}
+  - {name: "LLM and RAG", description: "Generative AI and retrieval",
+     query: {category: "NLP & LLM", sort: newest}}
+  - {name: "Computer Vision", description: "Perception and imaging",
+     query: {category: "Computer Vision", sort: newest}}
+  - {name: "Research Engineer", description: "Research-leaning engineering",
+     query: {category: Research, sort: score}}
+  - {name: "Posted this week", description: "Everything from the last seven days",
+     query: {max_age_days: 7, sort: newest}}
+  - {name: "Strong matches", description: "Score 70 and above",
+     query: {min_score: 70, sort: score}, pinned: true}
