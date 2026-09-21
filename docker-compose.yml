@@ -1,4 +1,4 @@
-# JobHunter
+# CareerOS
 #
 #   cp .env.example .env
 #   cp config/profile.example.yml config/profile.yml
@@ -79,10 +79,8 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *api-env
-      # The API serves; the worker sweeps. Discovery is disabled here so a
-      # restart of the API never triggers an unscheduled crawl.
-      SWEEP_INTERVAL_MINUTES: 0
-      SWEEP_ON_STARTUP: "false"
+      # The API serves; the worker scans. The API has no scheduler at all, so
+      # restarting it can never trigger an unscheduled crawl.
       CORS_ORIGINS: '["http://localhost:${WEB_PORT:-3000}"]'
     volumes:
       - ./config:/app/config:ro
@@ -100,8 +98,8 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *api-env
-      SWEEP_INTERVAL_MINUTES: ${SWEEP_INTERVAL_MINUTES:-60}
-      SWEEP_ON_STARTUP: ${SWEEP_ON_STARTUP:-true}
+      # Cadence and scan-on-startup come from the settings row, so they can be
+      # changed in the Automation screen without a restart. Nothing here.
       WORKER_NAME: ${WORKER_NAME:-worker-1}
     volumes:
       - ./config:/app/config:ro

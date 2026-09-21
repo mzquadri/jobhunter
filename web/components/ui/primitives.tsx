@@ -230,3 +230,202 @@ export function EmptyState({
     </div>
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/* Page scaffolding                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The standard page body. One max-width and one gutter for every screen, so
+ * the product does not drift into five different content widths.
+ *
+ * Wide by design: this is a dense information tool on a desktop, and the
+ * brief was explicit about not wasting half a 1440p screen on margins.
+ */
+export function Page({ className, ...props }: React.ComponentProps<"div">) {
+  return <div className={cn("mx-auto w-full max-w-[1600px] p-5", className)} {...props} />;
+}
+
+export function SectionTitle({
+  title,
+  hint,
+  action,
+}: {
+  title: string;
+  hint?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-2.5 flex items-end gap-3">
+      <div className="min-w-0">
+        <h2 className="text-[13px] font-semibold tracking-tight">{title}</h2>
+        {hint && <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>}
+      </div>
+      {action && <div className="ml-auto shrink-0">{action}</div>}
+    </div>
+  );
+}
+
+/** A compact statistic. Small on purpose: eight of these must fit in a row. */
+export function Stat({
+  label,
+  value,
+  hint,
+  tone,
+  href,
+}: {
+  label: string;
+  value: React.ReactNode;
+  hint?: string;
+  tone?: "ok" | "warn" | "info";
+  href?: string;
+}) {
+  const body = (
+    <div className="rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:border-ring/40">
+      <p className="truncate text-[11px] text-muted-foreground">{label}</p>
+      <p
+        className={cn(
+          "tabular mt-0.5 text-xl font-semibold leading-none",
+          tone === "ok" && "text-ok",
+          tone === "warn" && "text-warn",
+          tone === "info" && "text-info",
+        )}
+      >
+        {value}
+      </p>
+      {hint && <p className="mt-1 truncate text-[10px] text-muted-foreground">{hint}</p>}
+    </div>
+  );
+  return href ? <a href={href} className="block">{body}</a> : body;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Drawer — a right-hand panel that keeps the user in their list               */
+/* -------------------------------------------------------------------------- */
+export function Drawer({
+  open,
+  onClose,
+  children,
+  label,
+}: {
+  open: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+  label: string;
+}) {
+  React.useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    // Stop the page behind from scrolling under the panel.
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label={label}>
+      <div className="absolute inset-0 bg-black/40 animate-in fade-in" onClick={onClose} />
+      <div className="absolute inset-y-0 right-0 flex w-full max-w-[min(46rem,92vw)] flex-col border-l border-border bg-background shadow-2xl animate-in slide-in-from-right duration-200">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Misc                                                                        */
+/* -------------------------------------------------------------------------- */
+
+/** Determinate progress only. Never used to animate an unknown duration. */
+export function Progress({ value, className }: { value: number; className?: string }) {
+  return (
+    <span className={cn("block h-1 overflow-hidden rounded-full bg-muted", className)}>
+      <span
+        className="block h-full rounded-full bg-info transition-[width] duration-500"
+        style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
+      />
+    </span>
+  );
+}
+
+export function Tabs({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string; count?: number }[];
+}) {
+  return (
+    <div className="flex gap-0.5 rounded-md bg-muted p-0.5">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          onClick={() => onChange(option.value)}
+          aria-pressed={value === option.value}
+          className={cn(
+            "rounded px-2.5 py-1 text-[12px] transition-colors",
+            value === option.value
+              ? "bg-background font-medium text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {option.label}
+          {option.count !== undefined && (
+            <span className="tabular ml-1.5 text-[10px] opacity-60">{option.count}</span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A native-title tooltip. Enough for hints; no library, no portal. */
+export function Hint({ text, children }: { text: string; children: React.ReactNode }) {
+  return (
+    <span title={text} className="cursor-help">
+      {children}
+    </span>
+  );
+}
+
+export function ErrorState({
+  title,
+  message,
+  retry,
+}: {
+  title: string;
+  message: string;
+  retry?: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-danger/30 bg-danger-soft/40 px-5 py-8 text-center">
+      <p className="text-[13px] font-medium text-danger">{title}</p>
+      <p className="mx-auto mt-1 max-w-md text-[12px] text-muted-foreground">{message}</p>
+      {retry && (
+        <Button variant="outline" size="sm" className="mt-3" onClick={retry}>
+          Try again
+        </Button>
+      )}
+    </div>
+  );
+}
+
+export function TableSkeleton({ rows = 8 }: { rows?: number }) {
+  return (
+    <div className="space-y-1.5">
+      {Array.from({ length: rows }).map((_, i) => (
+        <Skeleton key={i} className="h-11 w-full" />
+      ))}
+    </div>
+  );
+}

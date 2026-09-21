@@ -1,4 +1,4 @@
-"""JobHunter API.
+"""CareerOS API.
 
 Serves the postings the worker discovers, and the fields the candidate owns.
 
@@ -20,10 +20,11 @@ from fastapi.responses import JSONResponse
 
 from app.db import SessionLocal, wait_for_schema
 from app.logging_conf import configure_logging
-from app.routers import jobs, ops, stats
+from app.routers import jobs, ops, product, stats
 from app.services.discovery import sync_companies
+from app.services.profile_service import load_profile, seed_if_missing
 from app.services.seed import seed_saved_searches
-from app.settings import get_profile, get_settings
+from app.settings import get_settings
 
 settings = get_settings()
 configure_logging(settings)
@@ -38,7 +39,8 @@ async def lifespan(_app: FastAPI):
     # replicas starting together must not race into the same migration.
     wait_for_schema()
     with SessionLocal() as session:
-        profile = get_profile()
+        seed_if_missing(session)
+        profile = load_profile(session)
         sync_companies(session, profile)
         seed_saved_searches(session, profile)
     log.info("api ready")
@@ -46,7 +48,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="JobHunter API",
+    title="CareerOS API",
     version="2.0.0",
     summary=(
         "AI/ML job postings collected from company applicant-tracking systems "
@@ -104,3 +106,7 @@ app.include_router(ops.companies)
 app.include_router(ops.runs)
 app.include_router(ops.searches)
 app.include_router(ops.meta)
+app.include_router(product.settings_router)
+app.include_router(product.scans_router)
+app.include_router(product.notifications_router)
+app.include_router(product.analytics_router)

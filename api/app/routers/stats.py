@@ -9,11 +9,13 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
+from app.deps import profile_dep
 from app.enrich.language import LANGUAGE_LABELS
 from app.models import PENDING_STATUSES, ApplicationStatus, Company, Job, Run
 from app.models.base import RunStatus
 from app.schemas import Charts, CompanyOut, DayCount, NamedCount, RunOut, Stats
-from app.settings import Profile, get_profile
+from app.services import scans
+from app.settings import Profile
 
 router = APIRouter(prefix="/api", tags=["stats"])
 
@@ -29,7 +31,7 @@ def _open(*conditions):
 @router.get("/stats", response_model=Stats, summary="Dashboard overview and charts")
 def stats(
     session: Session = Depends(get_session),
-    profile: Profile = Depends(get_profile),
+    profile: Profile = Depends(profile_dep),
 ) -> Stats:
     today = date.today()
     window = profile.max_age_days
@@ -62,12 +64,11 @@ def stats(
         .order_by(Run.started_at.desc()).limit(1)
     ).first()
 
-    next_run_at = None
-    if last_run and last_run.finished_at:
-        from app.settings import get_settings
-        minutes = get_settings().sweep_interval_minutes
-        if minutes > 0:
-            next_run_at = last_run.started_at + timedelta(minutes=minutes)
+    # Deliberately the same answer /api/scans gives. This used to read the API
+    # process's own SWEEP_INTERVAL_MINUTES, which is 0 so that the API never
+    # scans -- so the overview's "next scan" line was permanently blank while
+    # the worker was scanning happily every hour.
+    next_run_at = scans.scan_state(session).next_run_at
 
     watchlist = session.scalars(
         select(Company).where(Company.adapter.is_(None), Company.enabled.is_(True))

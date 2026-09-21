@@ -94,6 +94,31 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
+        /**
+         * Change a company's priority
+         * @description Promote or demote an employer from the interface.
+         *
+         *     Tier feeds the score directly -- a shortlisted employer lifts a match --
+         *     so this has to persist rather than live in the seed file. The next scan
+         *     reads it from here.
+         */
+        patch: operations["patch_company_api_companies__company_id__patch"];
+        trace?: never;
+    };
+    "/api/companies/{company_id}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Roles at one company */
+        get: operations["company_jobs_api_companies__company_id__jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
         patch?: never;
         trace?: never;
     };
@@ -222,10 +247,243 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current settings */
+        get: operations["read_settings_api_settings_get"];
+        /** Replace all settings */
+        put: operations["replace_settings_api_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update some settings
+         * @description Merge an update into the stored settings.
+         *
+         *     Validated before it is written, so a malformed section is refused with a
+         *     readable message rather than breaking the next scan.
+         */
+        patch: operations["patch_settings_api_settings_patch"];
+        trace?: never;
+    };
+    "/api/settings/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore defaults */
+        post: operations["reset_settings_api_settings_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Onboarding State
+         * @description Whether to show the wizard or the dashboard.
+         */
+        get: operations["onboarding_state_api_settings_onboarding_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/onboarding/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete Onboarding
+         * @description Save what the wizard collected and mark setup finished.
+         */
+        post: operations["complete_onboarding_api_settings_onboarding_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What the scanner is doing */
+        get: operations["scan_status_api_scans_get"];
+        put?: never;
+        /**
+         * Start a scan now
+         * @description Request a scan.
+         *
+         *     Answers 409 when one is already in progress, so the interface can say so
+         *     rather than appearing to do nothing.
+         */
+        post: operations["start_scan_api_scans_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Notifications */
+        get: operations["list_notifications_api_notifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/{notification_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark Read */
+        post: operations["mark_read_api_notifications__notification_id__read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark All Read */
+        post: operations["mark_all_read_api_notifications_read_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/signals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Recent activity, for the overview feed
+         * @description The same store the bell reads, presented as a feed.
+         *
+         *     Two separate systems would eventually disagree about what happened.
+         */
+        get: operations["career_signals_api_notifications_signals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analytics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Aggregates for the charts */
+        get: operations["analytics_api_analytics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * Analytics
+         * @description Aggregates for the analytics screen.
+         *
+         *     Only measures that change a decision. Counts of things that always go up
+         *     were deliberately left out.
+         */
+        Analytics: {
+            /** Discovered By Day */
+            discovered_by_day: components["schemas"]["DayCount"][];
+            /** By Country */
+            by_country: components["schemas"]["NamedCount"][];
+            /** By Category */
+            by_category: components["schemas"]["NamedCount"][];
+            /** By Company */
+            by_company: components["schemas"]["NamedCount"][];
+            /** By Language */
+            by_language: components["schemas"]["NamedCount"][];
+            /** By Seniority */
+            by_seniority: components["schemas"]["NamedCount"][];
+            /** By Source */
+            by_source: components["schemas"]["NamedCount"][];
+            /** Score Distribution */
+            score_distribution: components["schemas"]["NamedCount"][];
+            /** Freshness Distribution */
+            freshness_distribution: components["schemas"]["NamedCount"][];
+            /** Salary Bands */
+            salary_bands: components["schemas"]["SalaryBand"][];
+            /** Salary Coverage */
+            salary_coverage: number;
+            /** Funnel */
+            funnel: components["schemas"]["FunnelStage"][];
+            /** Totals */
+            totals: {
+                [key: string]: number;
+            };
+        };
         /**
          * ApplicationStatus
          * @enum {string}
@@ -279,6 +537,18 @@ export interface components {
              */
             is_automated: boolean;
         };
+        /**
+         * CompanyPatch
+         * @description What the user may change about an employer.
+         */
+        CompanyPatch: {
+            /** Tier */
+            tier?: ("dream" | "high" | "normal" | "ignored") | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Notes */
+            notes?: string | null;
+        };
         /** DayCount */
         DayCount: {
             /**
@@ -307,6 +577,15 @@ export interface components {
              * @default
              */
             evidence: string;
+        };
+        /** FunnelStage */
+        FunnelStage: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Count */
+            count: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -659,6 +938,48 @@ export interface components {
             /** Count */
             count: number;
         };
+        /** NotificationOut */
+        NotificationOut: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Title */
+            title: string;
+            /** Body */
+            body: string;
+            /** Href */
+            href: string;
+            /** Severity */
+            severity: string;
+            /** Job Id */
+            job_id?: string | null;
+            /** Company Id */
+            company_id?: string | null;
+            /** Read At */
+            read_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** NotificationPage */
+        NotificationPage: {
+            /** Items */
+            items: components["schemas"]["NotificationOut"][];
+            /** Unread */
+            unread: number;
+        };
+        /** OnboardingState */
+        OnboardingState: {
+            /** Onboarded */
+            onboarded: boolean;
+            /** Has Jobs */
+            has_jobs: boolean;
+            /** Has Run */
+            has_run: boolean;
+        };
         /** ProviderHealthOut */
         ProviderHealthOut: {
             /** Key */
@@ -853,6 +1174,15 @@ export interface components {
              */
             is_derived: boolean;
         };
+        /** SalaryBand */
+        SalaryBand: {
+            /** Label */
+            label: string;
+            /** Count */
+            count: number;
+            /** Floor */
+            floor: number;
+        };
         /**
          * SalaryBasis
          * @description Where a salary figure came from. Never let an estimate be displayed as
@@ -903,6 +1233,67 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * ScanStateOut
+         * @description What the scan is doing, for the top bar and the automation screen.
+         *
+         *     Progress is reported as sources completed, never as a percentage of time:
+         *     the backend knows how many sources answered, and inventing a smooth bar
+         *     would be a lie about information it does not have.
+         */
+        ScanStateOut: {
+            /** Running */
+            running: boolean;
+            /** Run Id */
+            run_id?: number | null;
+            /** Started At */
+            started_at?: string | null;
+            /**
+             * Triggered By
+             * @default
+             */
+            triggered_by: string;
+            /**
+             * Providers Done
+             * @default 0
+             */
+            providers_done: number;
+            /**
+             * Providers Total
+             * @default 0
+             */
+            providers_total: number;
+            /**
+             * Postings Seen
+             * @default 0
+             */
+            postings_seen: number;
+            /** Next Run At */
+            next_run_at?: string | null;
+            /** Last Finished At */
+            last_finished_at?: string | null;
+            /**
+             * Last Status
+             * @default
+             */
+            last_status: string;
+        };
+        /** SettingsOut */
+        SettingsOut: {
+            /** Profile */
+            profile: {
+                [key: string]: unknown;
+            };
+            /** Onboarded */
+            onboarded: boolean;
+            /** Seeded From */
+            seeded_from: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** Stats */
         Stats: {
@@ -1198,6 +1589,75 @@ export interface operations {
             };
         };
     };
+    patch_company_api_companies__company_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanyPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    company_jobs_api_companies__company_id__jobs_get: {
+        parameters: {
+            query?: {
+                include_closed?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                company_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_runs_api_runs_get: {
         parameters: {
             query?: {
@@ -1414,6 +1874,356 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    read_settings_api_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+        };
+    };
+    replace_settings_api_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_settings_api_settings_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_settings_api_settings_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+        };
+    };
+    onboarding_state_api_settings_onboarding_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingState"];
+                };
+            };
+        };
+    };
+    complete_onboarding_api_settings_onboarding_complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                } | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scan_status_api_scans_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanStateOut"];
+                };
+            };
+        };
+    };
+    start_scan_api_scans_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanStateOut"];
+                };
+            };
+        };
+    };
+    list_notifications_api_notifications_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                unread_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_read_api_notifications__notification_id__read_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_all_read_api_notifications_read_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPage"];
+                };
+            };
+        };
+    };
+    career_signals_api_notifications_signals_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analytics_api_analytics_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Analytics"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

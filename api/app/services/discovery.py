@@ -53,7 +53,7 @@ from app.providers import (
 )
 from app.providers.dates import days_old
 from app.security import RateLimit
-from app.services import health
+from app.services import health, signals
 from app.services.drafts import Drafter, DraftInput
 from app.settings import Profile, Settings
 
@@ -127,6 +127,12 @@ def run_discovery(
         run.drafts_written = drafts
         run.errors_count = sum(1 for r in provider_rows if r.error)
         run.status = RunStatus.PARTIAL if run.errors_count else RunStatus.OK
+
+        # Turn what changed into things worth telling the user. Derived
+        # strictly from rows this run wrote.
+        session.flush()
+        signals.generate_for_run(session, run, profile, new_ids)
+        signals.generate_follow_up_reminders(session, profile)
     except Exception as exc:
         log.exception("discovery run failed")
         run.status = RunStatus.FAILED

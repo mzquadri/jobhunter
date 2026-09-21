@@ -346,3 +346,109 @@ def label_job(job: JobSummary) -> JobSummary:
     job.seniority_label = SENIORITY_LABELS.get(job.seniority, "Not stated")
     job.remote_label = REMOTE_LABELS.get(job.remote_policy, "Not stated")
     return job
+
+
+# ---------------------------------------------------------------------------
+# product surfaces
+# ---------------------------------------------------------------------------
+class NotificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    kind: str
+    title: str
+    body: str
+    href: str
+    severity: str
+    job_id: str | None = None
+    company_id: str | None = None
+    read_at: datetime | None = None
+    created_at: datetime
+
+
+class NotificationPage(BaseModel):
+    items: list[NotificationOut]
+    unread: int
+
+
+class ScanStateOut(BaseModel):
+    """What the scan is doing, for the top bar and the automation screen.
+
+    Progress is reported as sources completed, never as a percentage of time:
+    the backend knows how many sources answered, and inventing a smooth bar
+    would be a lie about information it does not have.
+    """
+
+    running: bool
+    run_id: int | None = None
+    started_at: datetime | None = None
+    triggered_by: str = ""
+    providers_done: int = 0
+    providers_total: int = 0
+    postings_seen: int = 0
+    next_run_at: datetime | None = None
+    last_finished_at: datetime | None = None
+    last_status: str = ""
+
+
+class SettingsOut(BaseModel):
+    profile: dict
+    onboarded: bool
+    seeded_from: str
+    updated_at: datetime
+
+
+class SettingsPatch(BaseModel):
+    """A partial update. Nested sections merge; lists replace."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class OnboardingState(BaseModel):
+    onboarded: bool
+    has_jobs: bool
+    has_run: bool
+
+
+class SalaryBand(BaseModel):
+    label: str
+    count: int
+    floor: int
+
+
+class FunnelStage(BaseModel):
+    key: str
+    label: str
+    count: int
+
+
+class Analytics(BaseModel):
+    """Aggregates for the analytics screen.
+
+    Only measures that change a decision. Counts of things that always go up
+    were deliberately left out.
+    """
+
+    discovered_by_day: list[DayCount]
+    by_country: list[NamedCount]
+    by_category: list[NamedCount]
+    by_company: list[NamedCount]
+    by_language: list[NamedCount]
+    by_seniority: list[NamedCount]
+    by_source: list[NamedCount]
+    score_distribution: list[NamedCount]
+    freshness_distribution: list[NamedCount]
+    salary_bands: list[SalaryBand]
+    salary_coverage: float
+    funnel: list[FunnelStage]
+    totals: dict[str, int]
+
+
+class CompanyPatch(BaseModel):
+    """What the user may change about an employer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tier: Literal["dream", "high", "normal", "ignored"] | None = None
+    enabled: bool | None = None
+    notes: Annotated[str, Field(max_length=5_000)] | None = None
