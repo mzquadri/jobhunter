@@ -261,6 +261,75 @@ class TestTitlesThatDoNotSayMachineLearning:
         assert not any("description rather than the title" in g for g in result.gaps)
 
 
+class TestSomewhereYouCannotWork:
+    """Found by reading real results, not by imagining a test case.
+
+    A live scan produced a Machine Learning role in Ho Chi Minh City at 81 and
+    one in Maryland at 78, both with a location sub-score of 0. Location is 20%
+    of a weighted average, so a strong technical, education and domain score
+    carried them over the line regardless. An average cannot say "you cannot
+    take this job"; only a penalty can.
+    """
+
+    BODY = (
+        "Machine learning, Python, PyTorch, deep learning, MLOps, Docker. "
+        "Masters degree. Automotive."
+    )
+
+    @pytest.mark.parametrize("location", [
+        "Thành phố Hồ Chí Minh, Hồ Chí Minh, vn",
+        "US - Gaithersburg - MD",
+        "Mississauga",
+        "Singapore",
+    ])
+    def test_a_role_outside_your_markets_falls_below_the_line(self, engine, location):
+        result = evaluate(engine, "Machine Learning Engineer", self.BODY, location=location)
+        assert result.score < WORTH_APPLYING, (
+            f"{location} scored {result.score}: a role somewhere you cannot work "
+            f"is not a weaker match, it is a different thing"
+        )
+
+    @pytest.mark.parametrize("location", [
+        "Munich, Germany", "Zurich, Switzerland", "Berlin", "Vienna, Austria",
+    ])
+    def test_your_own_markets_are_untouched(self, engine, location):
+        result = evaluate(engine, "Machine Learning Engineer", self.BODY, location=location)
+        assert result.score >= WORTH_APPLYING, f"{location} scored {result.score}"
+
+    @pytest.mark.parametrize("placeholder", [
+        "3 Locations", "2 Locations", "Multiple Locations", "R0325844", "",
+    ])
+    def test_a_missing_location_is_not_punished_as_a_foreign_one(
+        self, engine, placeholder
+    ):
+        # Applicant-tracking systems put these in the location field when they
+        # have nothing to say. That is absent data, not a different continent,
+        # and treating it as one throws away real roles over a formatting quirk.
+        penalised = evaluate(
+            engine, "Machine Learning Engineer", self.BODY, location=placeholder
+        )
+        abroad = evaluate(
+            engine, "Machine Learning Engineer", self.BODY, location="Mississauga"
+        )
+        assert penalised.score > abroad.score, f"{placeholder!r} was treated as abroad"
+
+    def test_the_reason_is_stated_on_the_job(self, engine):
+        result = evaluate(
+            engine, "Machine Learning Engineer", self.BODY, location="Mississauga"
+        )
+        assert any("outside the places you work" in g for g in result.gaps)
+
+    def test_remote_softens_it_rather_than_ignoring_it(self, engine):
+        onsite = evaluate(
+            engine, "Machine Learning Engineer", self.BODY, location="Mississauga"
+        )
+        remote = evaluate(
+            engine, "Machine Learning Engineer",
+            self.BODY + " This is a fully remote position.", location="Mississauga",
+        )
+        assert remote.score > onsite.score
+
+
 class TestRelevanceClassifier:
     def test_grades_rather_than_decides(self):
         assert classify_relevance("Machine Learning Engineer", "").level is Relevance.CERTAIN
