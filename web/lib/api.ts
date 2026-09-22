@@ -36,6 +36,8 @@ export type ScanStateOut = Schemas["ScanStateOut"];
 export type SettingsOut = Schemas["SettingsOut"];
 export type OnboardingState = Schemas["OnboardingState"];
 export type Analytics = Schemas["Analytics"];
+export type Coverage = Schemas["Coverage"];
+export type CoverageBucket = Schemas["CoverageBucket"];
 
 export type JobQuery = NonNullable<operations["list_jobs_api_jobs_get"]["parameters"]["query"]>;
 
@@ -118,8 +120,16 @@ export const api = {
   analytics: (days = 30) => request<Analytics>(`/api/analytics${qs({ days })}`),
 
   // companies
-  companies: (query: { tier?: string; automated?: boolean } = {}) =>
-    request<CompanyOut[]>(`/api/companies${qs(query)}`),
+  companies: (
+    query: {
+      tier?: string;
+      automated?: boolean;
+      industry?: string;
+      country?: string;
+      source_status?: string;
+    } = {},
+  ) => request<CompanyOut[]>(`/api/companies${qs(query)}`),
+  coverage: () => request<Coverage>("/api/coverage"),
   company: (id: string) => request<CompanyOut>(`/api/companies/${encodeURIComponent(id)}`),
   companyJobs: (id: string, includeClosed = false) =>
     request<JobPage>(
@@ -208,23 +218,56 @@ export const ALL_STATUSES: ApplicationStatus[] = [
 ];
 
 /**
- * Match bands. UI categories, not claims about the employer's opinion —
- * nothing here is called a "perfect" match.
+ * Match bands.
+ *
+ * UI categories, not claims about the employer's opinion — nothing here is
+ * called a "perfect" match. The band that matters is `worth_applying`: a role
+ * where you meet roughly 60% of what was described is one to apply to, because
+ * a job description is a wish list rather than a minimum. The product is built
+ * around that line, so the vocabulary is too.
  */
-export type MatchBand = "strong" | "very_good" | "good" | "moderate" | "low";
+export type MatchBand =
+  | "exceptional"
+  | "strong"
+  | "good"
+  | "worth_applying"
+  | "stretch"
+  | "low";
+
+/** The line at or above which applying is worth the evening. */
+export const WORTH_APPLYING = 60;
+/** The line at which a role goes to the top of the morning list. */
+export const HIGH_PRIORITY = 80;
 
 export function matchBand(score: number): MatchBand {
-  if (score >= 90) return "strong";
-  if (score >= 80) return "very_good";
+  if (score >= 90) return "exceptional";
+  if (score >= HIGH_PRIORITY) return "strong";
   if (score >= 70) return "good";
-  if (score >= 60) return "moderate";
+  if (score >= WORTH_APPLYING) return "worth_applying";
+  if (score >= 50) return "stretch";
   return "low";
 }
 
 export const MATCH_LABELS: Record<MatchBand, string> = {
+  exceptional: "Exceptional match",
   strong: "Strong match",
-  very_good: "Very good",
+  good: "Good match",
+  worth_applying: "Worth applying",
+  stretch: "Stretch",
+  low: "Low relevance",
+};
+
+/** Shorter, for a table cell where the score is already visible. */
+export const MATCH_LABELS_SHORT: Record<MatchBand, string> = {
+  exceptional: "Exceptional",
+  strong: "Strong",
   good: "Good",
-  moderate: "Moderate",
+  worth_applying: "Worth applying",
+  stretch: "Stretch",
   low: "Low",
 };
+
+/** Whether the product should actively encourage an application. */
+export function isWorthApplying(score: number): boolean {
+  return score >= WORTH_APPLYING;
+}

@@ -42,6 +42,8 @@ type SearchPrefs = {
   max_age_days: number;
   archive_after_days: number;
   min_score: number;
+  recommend_min_score: number;
+  high_match_score: number;
   draft_min_score: number;
   keep_undated: boolean;
   target_salary_eur: number;
@@ -388,17 +390,37 @@ function SearchSection({ search, onSave }: { search: SearchPrefs; onSave: Save }
         </Field>
 
         <Field
-          label={`Hide anything scoring under ${draft.min_score}`}
-          htmlFor="minscore"
-          hint="The score is fit against your profile, not a prediction of an offer."
+          label={`Show me roles from ${draft.recommend_min_score}% up`}
+          htmlFor="recommend"
+          hint={
+            "The number the whole product turns on. A role where you meet roughly " +
+            "this much of the description is worth an application — a job advert is " +
+            "an employer's wish list, not a minimum."
+          }
         >
           <input
-            id="minscore"
+            id="recommend"
             type="range"
             min={0}
             max={100}
-            value={draft.min_score}
-            onChange={(e) => set("min_score", Number(e.target.value))}
+            value={draft.recommend_min_score}
+            onChange={(e) => set("recommend_min_score", Number(e.target.value))}
+            className="w-full accent-[var(--color-info)]"
+          />
+        </Field>
+
+        <Field
+          label={`Call ${draft.high_match_score}% and above high priority`}
+          htmlFor="highmatch"
+          hint="These get their own list at the top of the dashboard."
+        >
+          <input
+            id="highmatch"
+            type="range"
+            min={50}
+            max={100}
+            value={draft.high_match_score}
+            onChange={(e) => set("high_match_score", Number(e.target.value))}
             className="w-full accent-[var(--color-info)]"
           />
         </Field>
@@ -450,6 +472,27 @@ function SearchSection({ search, onSave }: { search: SearchPrefs; onSave: Save }
           onChange={(v) => set("salary_is_hard_filter", v)}
         />
       </div>
+
+      <Field
+        label={`Keep anything scoring ${draft.min_score} or more`}
+        htmlFor="minscore"
+        hint={
+          "What gets stored, which is deliberately lower than what gets shown. " +
+          "Every scan re-scores, so a 43 today can be a 67 once you add a skill or " +
+          "widen a location — discarding it now would need the whole market re-fetched " +
+          "to get it back."
+        }
+      >
+        <input
+          id="minscore"
+          type="range"
+          min={0}
+          max={100}
+          value={draft.min_score}
+          onChange={(e) => set("min_score", Number(e.target.value))}
+          className="w-full max-w-md accent-[var(--color-info)]"
+        />
+      </Field>
 
       <Field
         label="Archive roles after"

@@ -3,10 +3,12 @@
 import { ExternalLink, Star, X } from "lucide-react";
 import {
   MATCH_LABELS,
+  MATCH_LABELS_SHORT,
   matchBand,
   STATUS_LABELS,
   type Flag,
   type JobSummary,
+  type MatchBand,
   type SubScores,
 } from "@/lib/api";
 import { Badge, Button } from "@/components/ui/primitives";
@@ -16,20 +18,28 @@ import { cn, isBlockingFlag, postedAge } from "@/lib/utils";
 /* Match score                                                                 */
 /* -------------------------------------------------------------------------- */
 
-const BAND_COLOR: Record<string, string> = {
+/**
+ * Band colour.
+ *
+ * Restrained on purpose: three tones across six bands, not a rainbow. The eye
+ * should be drawn to the number, and the only categorical jump worth colouring
+ * is the one at 60 — above it applying is worth an evening, below it is not.
+ */
+const BAND_COLOR: Record<MatchBand, string> = {
+  exceptional: "text-ok",
   strong: "text-ok",
-  very_good: "text-ok",
   good: "text-foreground",
-  moderate: "text-muted-foreground",
+  worth_applying: "text-foreground",
+  stretch: "text-muted-foreground",
   low: "text-muted-foreground/60",
 };
 
 /**
  * The headline number with its band.
  *
- * The band is a UI category, not a claim about the employer's opinion.
- * Nothing above 80 is called "perfect" — the highest label is "Strong match",
- * because the score measures fit against a profile, not likelihood of an offer.
+ * The band is a UI category, not a claim about the employer's opinion. Nothing
+ * is called "perfect": the score measures fit against a profile, not the
+ * likelihood of an offer.
  */
 export function MatchScore({
   score,
@@ -55,6 +65,25 @@ export function MatchScore({
       {showLabel && (
         <span className="mt-1 text-[10px] text-muted-foreground">{MATCH_LABELS[band]}</span>
       )}
+    </span>
+  );
+}
+
+/**
+ * The verdict, in words, next to the number.
+ *
+ * Exists because a bare "68" reads as a failing grade to anyone who went to
+ * school, and 68 is a role worth an application. The label is what stops the
+ * number being read as a mark out of a hundred.
+ */
+export function MatchVerdict({ score, className }: { score: number; className?: string }) {
+  const band = matchBand(score);
+  return (
+    <span className={cn("inline-flex items-baseline gap-1.5", className)}>
+      <span className={cn("tabular text-[13px] font-semibold", BAND_COLOR[band])}>
+        {score}
+      </span>
+      <span className="text-[11px] text-muted-foreground">{MATCH_LABELS_SHORT[band]}</span>
     </span>
   );
 }
@@ -251,9 +280,18 @@ export function JobFeedRow({
       role="button"
       tabIndex={0}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen()}
-      className="row-hover flex cursor-pointer items-center gap-3 border-b border-border px-3 py-2.5 last:border-0"
+      className="row-hover flex cursor-pointer items-start gap-3 border-b border-border px-3.5 py-2.5 last:border-0"
     >
-      <MatchScore score={job.score} />
+      {/* The score column is fixed width so every row's title starts at the
+          same x. A ragged left edge is what makes a dense list unreadable. */}
+      <span className="w-[62px] shrink-0 pt-px text-right">
+        <span className="block">
+          <MatchScore score={job.score} />
+        </span>
+        <span className="mt-0.5 block text-[9.5px] leading-tight text-muted-foreground">
+          {MATCH_LABELS_SHORT[matchBand(job.score)]}
+        </span>
+      </span>
 
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-1.5">
@@ -263,10 +301,11 @@ export function JobFeedRow({
           <FlagBadges flags={job.flags} />
         </span>
         <span className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 text-[11px] text-muted-foreground">
-          <span>{job.company_name}</span>
+          <span className="font-medium text-foreground/80">{job.company_name}</span>
           <span>{job.city || job.location_raw || "location not stated"}</span>
           {job.remote_label !== "Not stated" && <span>{job.remote_label}</span>}
           <span>{postedAge(job.age_days, job.posted_at)}</span>
+          <span>{job.language_label}</span>
           {job.salary.display && <span className="tabular">{job.salary.display}</span>}
         </span>
       </span>

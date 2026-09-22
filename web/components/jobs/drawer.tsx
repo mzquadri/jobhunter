@@ -10,12 +10,14 @@ import {
   Loader2,
   MapPin,
   Star,
+  TriangleAlert,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   ALL_STATUSES,
   api,
+  isWorthApplying,
   MATCH_LABELS,
   matchBand,
   PIPELINE_STAGES,
@@ -34,7 +36,7 @@ import {
   Textarea,
 } from "@/components/ui/primitives";
 import { FlagBadges, MatchScore, ScoreBreakdown } from "@/components/jobs/shared";
-import { cn, postedAge, relativeTime } from "@/lib/utils";
+import { cn, isBlockingFlag, postedAge, relativeTime } from "@/lib/utils";
 
 /**
  * Job detail, as a right-hand panel.
@@ -137,6 +139,51 @@ export function JobDrawer({
 
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The line that decides what the reader does next.
+ *
+ * A bare "68 of 100" reads as a failing grade to anyone who has ever sat an
+ * exam, and 68 here is a role worth an evening. So the panel says so in a
+ * sentence before showing any breakdown. Below the threshold it says the
+ * opposite just as plainly, rather than going quiet and leaving the number to
+ * be interpreted.
+ */
+function Verdict({ score, blocked }: { score: number; blocked: boolean }) {
+  if (blocked) {
+    return (
+      <p className="flex items-start gap-2 rounded-lg border border-warn/40 bg-warn-soft/40 px-3 py-2.5 text-[12.5px]">
+        <TriangleAlert className="mt-px size-4 shrink-0 text-warn" />
+        <span>
+          <strong className="font-medium">Check the requirements first.</strong> This
+          posting states a condition — citizenship, clearance or sponsorship — that may
+          rule the role out whatever your fit.
+        </span>
+      </p>
+    );
+  }
+
+  if (isWorthApplying(score)) {
+    return (
+      <p className="flex items-start gap-2 rounded-lg border border-ok/40 bg-ok-soft/40 px-3 py-2.5 text-[12.5px]">
+        <Check className="mt-px size-4 shrink-0 text-ok" />
+        <span>
+          <strong className="font-medium">Worth applying.</strong> You will not meet
+          every line below, and you are not expected to — a job description is what an
+          employer would like, not a minimum.
+        </span>
+      </p>
+    );
+  }
+
+  return (
+    <p className="rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-[12.5px] text-muted-foreground">
+      <strong className="font-medium text-foreground">A long shot.</strong> Below the
+      threshold you set for a realistic application. The breakdown below shows which
+      part pulled it down.
+    </p>
+  );
+}
+
 function Header({ job, onClose }: { job: JobDetail; onClose: () => void }) {
   return (
     <div className="border-b border-border p-4">
@@ -184,10 +231,17 @@ function Header({ job, onClose }: { job: JobDetail; onClose: () => void }) {
 
 function MatchTab({ job }: { job: JobDetail }) {
   const band = matchBand(job.score);
+  // A blocking flag is a reason the role may be closed to you regardless of
+  // fit -- citizenship, sponsorship. Language is a hurdle, not a wall, and is
+  // already priced into the score, so it does not suppress the verdict.
+  const blocked = job.flags.some((flag) => isBlockingFlag(flag.code));
+
   return (
     <div className="space-y-5 p-4">
+      <Verdict score={job.score} blocked={blocked} />
+
       <section>
-        <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <p className="mb-2 text-[11px] font-medium text-muted-foreground">
           {MATCH_LABELS[band]} · {job.score} of 100
         </p>
         <ScoreBreakdown sub={job.sub_scores} />

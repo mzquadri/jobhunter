@@ -188,6 +188,49 @@ class CompanyOut(BaseModel):
     notes: str = ""
     is_automated: bool = False
 
+    # ---- structure and honesty ------------------------------------------
+    country: str = ""
+    parent_id: str | None = None
+    parent_name: str = ""
+    aliases: list[str] = []
+    #: live / idle / degraded / rate_limited / manual / broken.
+    source_status: str = "manual"
+    verified_at: datetime | None = None
+    #: The board this employer arrived through, if nobody configured them.
+    discovered_from: str = ""
+    #: Roles at or above the recommend threshold. The number that decides
+    #: whether opening this employer is worth the click.
+    worth_applying: int = 0
+    best_score: int = 0
+
+
+class CoverageBucket(BaseModel):
+    key: str
+    label: str
+    companies: int
+    automated: int
+    manual: int
+    open_roles: int
+
+
+class Coverage(BaseModel):
+    """What discovery actually reaches, stated without rounding up.
+
+    Every count here is of rows in the companies table, split by whether
+    anything has ever successfully fetched from them. "Tracked" is not
+    "monitored": the difference is the whole point of the section.
+    """
+
+    tracked: int
+    automated: int
+    manual: int
+    by_status: dict[str, int]
+    by_industry: list[CoverageBucket]
+    by_country: list[CoverageBucket]
+    providers: list[CoverageBucket]
+    discovered_by_boards: int
+    last_scan_at: datetime | None = None
+
 
 # ---------------------------------------------------------------------------
 # runs

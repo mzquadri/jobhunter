@@ -50,6 +50,46 @@ const TIER_LABEL: Record<string, string> = Object.fromEntries(
 );
 
 /**
+ * What is actually known about reaching an employer's jobs.
+ *
+ * "Tracked" and "monitored" are different words here and they mean different
+ * things. Only `live` and `idle` describe a source that has answered; the rest
+ * say plainly that nothing is being fetched, which is more useful than a row
+ * implying coverage that does not exist.
+ */
+const SOURCE_STATUS: Record<
+  string,
+  { label: string; tone: "ok" | "warn" | "danger" | "outline"; hint: string }
+> = {
+  live: { label: "Live", tone: "ok", hint: "Answering, and returning roles." },
+  idle: {
+    label: "No openings",
+    tone: "outline",
+    hint: "Answering normally; nothing open right now.",
+  },
+  degraded: {
+    label: "Degraded",
+    tone: "warn",
+    hint: "Answering, but failing often enough that results may be incomplete.",
+  },
+  rate_limited: {
+    label: "Rate limited",
+    tone: "warn",
+    hint: "Refusing us for now. Backed off rather than retried harder.",
+  },
+  broken: {
+    label: "Broken",
+    tone: "danger",
+    hint: "Had a working source; it stopped answering.",
+  },
+  manual: {
+    label: "By hand",
+    tone: "outline",
+    hint: "No machine-readable source. Open their careers site to check.",
+  },
+};
+
+/**
  * The employers CareerOS watches.
  *
  * Two facts decide everything on this screen: whether an employer publishes a
@@ -61,6 +101,7 @@ export function Companies() {
   const [text, setText] = useState("");
   const query = useDebounced(text, 200).trim().toLowerCase();
   const [view, setView] = useState("all");
+  const [industry, setIndustry] = useState("");
   const [openCompany, setOpenCompany] = useState<CompanyOut | null>(null);
 
   const { data, error, loading, refresh, setData } = useResource(() => api.companies(), []);
@@ -91,17 +132,26 @@ export function Companies() {
     () => ({
       all: companies.length,
       dream: companies.filter((c) => c.tier === "dream").length,
-      hiring: companies.filter((c) => c.open_roles > 0).length,
+      hiring: companies.filter((c) => c.worth_applying > 0).length,
+      automated: companies.filter((c) => c.is_automated).length,
       manual: companies.filter((c) => !c.is_automated).length,
     }),
+    [companies],
+  );
+
+  const industries = useMemo(
+    () =>
+      Array.from(new Set(companies.map((c) => c.industry).filter(Boolean))).sort(),
     [companies],
   );
 
   const rows = useMemo(() => {
     let list = companies;
     if (view === "dream") list = list.filter((c) => c.tier === "dream");
-    else if (view === "hiring") list = list.filter((c) => c.open_roles > 0);
+    else if (view === "hiring") list = list.filter((c) => c.worth_applying > 0);
+    else if (view === "automated") list = list.filter((c) => c.is_automated);
     else if (view === "manual") list = list.filter((c) => !c.is_automated);
+    if (industry) list = list.filter((c) => c.industry === industry);
     if (query) {
       list = list.filter(
         (c) =>
@@ -112,14 +162,18 @@ export function Companies() {
     }
     // Open roles first, then the ones you care most about.
     const rank = { dream: 0, high: 1, normal: 2, ignored: 3 } as Record<string, number>;
+    // Employers you could apply to today first, then the ones you care most
+    // about, then everyone else. Open-role count is the tie-break, not the lead:
+    // forty irrelevant vacancies are worth less than one 78% match.
     return [...list].sort(
       (a, b) =>
-        Number(b.open_roles > 0) - Number(a.open_roles > 0) ||
+        Number(b.worth_applying > 0) - Number(a.worth_applying > 0) ||
         (rank[a.tier] ?? 9) - (rank[b.tier] ?? 9) ||
-        b.open_roles - a.open_roles ||
+        b.worth_applying - a.worth_applying ||
+        b.best_score - a.best_score ||
         a.name.localeCompare(b.name),
     );
-  }, [companies, query, view]);
+  }, [companies, query, view, industry]);
 
   if (error) {
     return (
@@ -156,10 +210,24 @@ export function Companies() {
           options={[
             { value: "all", label: "All", count: counts.all },
             { value: "dream", label: "Shortlist", count: counts.dream },
-            { value: "hiring", label: "Hiring now", count: counts.hiring },
-            { value: "manual", label: "Check by hand", count: counts.manual },
+            { value: "hiring", label: "Worth applying", count: counts.hiring },
+            { value: "automated", label: "Read automatically", count: counts.automated },
+            { value: "manual", label: "By hand", count: counts.manual },
           ]}
         />
+        <Select
+          value={industry}
+          onChange={(e) => setIndustry(e.target.value)}
+          aria-label="Filter by industry"
+          className="h-8 text-[12px]"
+        >
+          <option value="">Every industry</option>
+          {industries.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </Select>
       </div>
 
       {loading && !data ? (
@@ -179,9 +247,11 @@ export function Companies() {
             <TableHeader>
               <TableRow>
                 <TableHead>Employer</TableHead>
-                <TableHead className="w-24">Open</TableHead>
+                <TableHead className="w-28">Worth applying</TableHead>
+                <TableHead className="w-20">Best</TableHead>
+                <TableHead className="w-20">Open</TableHead>
                 <TableHead className="w-24">New (7d)</TableHead>
-                <TableHead className="w-40">How it is read</TableHead>
+                <TableHead className="w-32">Source</TableHead>
                 <TableHead className="w-32">Last checked</TableHead>
                 <TableHead className="w-36">Priority</TableHead>
                 <TableHead className="w-10" />
@@ -201,10 +271,30 @@ export function Companies() {
                       {!company.enabled && <Badge variant="outline">Paused</Badge>}
                     </span>
                     <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                      {company.industry || "industry not recorded"}
+                      {[
+                        company.industry || "industry not recorded",
+                        company.parent_name && `part of ${company.parent_name}`,
+                        company.country?.toUpperCase(),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </span>
                   </TableCell>
                   <TableCell className="tabular text-[13px]">
+                    {company.worth_applying > 0 ? (
+                      <span className="font-medium text-ok">{company.worth_applying}</span>
+                    ) : (
+                      <span className="text-muted-foreground/60">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="tabular text-[13px]">
+                    {company.best_score > 0 ? (
+                      company.best_score
+                    ) : (
+                      <span className="text-muted-foreground/60">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="tabular text-[13px] text-muted-foreground">
                     {company.open_roles > 0 ? company.open_roles : "—"}
                   </TableCell>
                   <TableCell className="tabular text-[13px]">
@@ -215,11 +305,7 @@ export function Companies() {
                     )}
                   </TableCell>
                   <TableCell>
-                    {company.is_automated ? (
-                      <Badge variant="ok">{company.adapter}</Badge>
-                    ) : (
-                      <Badge variant="outline">by hand</Badge>
-                    )}
+                    <SourceBadge company={company} />
                   </TableCell>
                   <TableCell className="text-[11.5px] text-muted-foreground">
                     {company.last_checked_at ? relativeTime(company.last_checked_at) : "never"}
@@ -430,6 +516,27 @@ function CompanyDrawer({
         </>
       )}
     </Drawer>
+  );
+}
+
+/**
+ * What is known about this employer's source, in one badge.
+ *
+ * The adapter name goes in the tooltip rather than the label: "greenhouse"
+ * tells the user nothing about whether their jobs are arriving, which is the
+ * only question this column answers.
+ */
+function SourceBadge({ company }: { company: CompanyOut }) {
+  const status = SOURCE_STATUS[company.source_status] ?? SOURCE_STATUS.manual;
+  const detail = company.is_automated
+    ? `${status.hint} Read through ${company.adapter}.`
+    : company.discovered_from
+      ? `${status.hint} Found through ${company.discovered_from}.`
+      : status.hint;
+  return (
+    <Badge variant={status.tone} title={detail}>
+      {status.label}
+    </Badge>
   );
 }
 
