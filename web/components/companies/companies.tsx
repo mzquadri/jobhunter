@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { Building2, ExternalLink, Search } from "lucide-react";
+import { ExternalLink, Search } from "lucide-react";
 import { toast } from "sonner";
 import { api, type CompanyOut, type CompanyPatch, type JobSummary } from "@/lib/api";
 import { useDebounced, useResource } from "@/lib/hooks";
@@ -29,6 +29,7 @@ import {
   Tabs,
   Textarea,
 } from "@/components/ui/primitives";
+import { CompanyLogo } from "@/components/companies/logo";
 import { cn, relativeTime } from "@/lib/utils";
 
 type Tier = NonNullable<CompanyPatch["tier"]>;
@@ -266,6 +267,7 @@ export function Companies() {
                 >
                   <TableCell>
                     <span className="flex items-center gap-2">
+                      <CompanyLogo name={company.name} careersUrl={company.careers_url} size="sm" />
                       <span className="text-[13px] font-medium">{company.name}</span>
                       {company.tier === "dream" && <Badge variant="outline">Shortlist</Badge>}
                       {!company.enabled && <Badge variant="outline">Paused</Badge>}
@@ -393,9 +395,12 @@ function CompanyDrawer({
         <>
           <header className="border-b border-border p-4">
             <div className="flex items-start gap-3">
-              <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted">
-                <Building2 className="size-4 text-muted-foreground" />
-              </span>
+              <CompanyLogo
+                name={company.name}
+                careersUrl={company.careers_url}
+                size="lg"
+                className="mt-0.5"
+              />
               <div className="min-w-0 flex-1">
                 <h2 className="text-[15px] font-semibold tracking-tight">{company.name}</h2>
                 <p className="mt-0.5 text-[12px] text-muted-foreground">
@@ -510,6 +515,8 @@ function CompanyDrawer({
 
           <JobDrawer
             jobId={openJob}
+            siblings={(jobs.data?.items ?? []).map((j) => j.id)}
+            onNavigate={setOpenJob}
             onClose={() => setOpenJob(null)}
             onChanged={() => void jobs.refresh(true)}
           />

@@ -289,6 +289,66 @@ class TestSourceStatusReflectsReality:
             assert session.get(Company, "ferrari").source_status == SourceStatus.MANUAL
 
 
+class TestScanCadence:
+    """§65/§66 — ask often enough to be useful, not often enough to be rude.
+
+    117 sources every hour is ~2,800 requests a day to other people's servers
+    to re-read a market that moves in days. The employers that matter keep the
+    hourly cadence; the rest are spaced out.
+    """
+
+    def _company(self, tier, last_checked):
+        from app.models import Company
+
+        return Company(
+            id="x", name="X", tier=tier, adapter="greenhouse", adapter_arg="x",
+            last_checked_at=last_checked,
+        )
+
+    def test_a_shortlisted_employer_is_always_due(self):
+        from datetime import timedelta
+
+        from app.models import CompanyTier, utcnow
+        from app.services.discovery import _is_due
+
+        now = utcnow()
+        company = self._company(CompanyTier.DREAM, now - timedelta(minutes=1))
+        assert _is_due(company, now), "a dream employer is checked every run"
+
+    def test_a_normal_employer_waits_for_its_cadence(self):
+        from datetime import timedelta
+
+        from app.models import CompanyTier, utcnow
+        from app.services.discovery import CADENCE_MINUTES, _is_due
+
+        now = utcnow()
+        wait = CADENCE_MINUTES[CompanyTier.NORMAL]
+        assert not _is_due(self._company(CompanyTier.NORMAL, now - timedelta(minutes=5)), now)
+        assert _is_due(
+            self._company(CompanyTier.NORMAL, now - timedelta(minutes=wait + 1)), now
+        )
+
+    def test_an_employer_never_checked_is_due_immediately(self):
+        from app.models import CompanyTier, utcnow
+        from app.services.discovery import _is_due
+
+        # Otherwise adding an employer means waiting out their tier before
+        # seeing a single job from them.
+        assert _is_due(self._company(CompanyTier.NORMAL, None), utcnow())
+
+    def test_a_naive_timestamp_does_not_crash(self):
+        # SQLite hands back naive datetimes; Postgres does not. Comparing the
+        # two raises, and it would raise inside the scan rather than in a test.
+        from datetime import datetime, timedelta
+
+        from app.models import CompanyTier, utcnow
+        from app.services.discovery import _is_due
+
+        now = utcnow()
+        naive = datetime.now().replace(tzinfo=None) - timedelta(hours=9)
+        assert _is_due(self._company(CompanyTier.NORMAL, naive), now)
+
+
 class TestMatchKey:
     @pytest.mark.parametrize("a,b", [
         ("Celonis SE", "Celonis"),
