@@ -22,7 +22,7 @@ from app.models.base import (
     strip_accents,
     utcnow,
 )
-from app.models.company import Company
+from app.models.company import Company, SourceStatus
 from app.models.job import Job, JobSource, StatusEvent
 from app.models.run import ProviderHealth, Run, RunProvider
 from app.models.search import SavedSearch
@@ -37,6 +37,7 @@ __all__ = [
     "Base",
     "Company",
     "CompanyTier",
+    "SourceStatus",
     "EmploymentType",
     "Job",
     "JobSource",

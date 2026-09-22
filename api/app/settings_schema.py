@@ -166,6 +166,14 @@ class CompanyEntry(BaseModel):
     careers_url: str = ""
     industry: str = ""
     enabled: bool = True
+    #: ISO-3166 alpha-2, lowercase. Used by the company explorer's filters.
+    country: str = ""
+    #: Slug of the owning group: Audi -> volkswagen-group. The vacancy always
+    #: keeps the employer that posted it; this only records who owns whom.
+    parent: str | None = None
+    #: Other names this employer posts under, so a board result can be matched
+    #: back to a known company instead of creating a duplicate.
+    aliases: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def adapter_needs_an_argument(self) -> CompanyEntry:
