@@ -154,9 +154,18 @@ class TestExplainability:
         assert not any("scala" in g.lower() for g in result.gaps)
 
     def test_profile_skills_are_never_reported_as_missing(self, engine):
-        # Terraform is on the profile, so naming it is a match, not a gap.
-        result = evaluate(engine, description="You will use Terraform daily.")
-        assert not any("terraform" in g.lower() for g in result.gaps)
+        # Docker is on the profile, so naming it is a match, not a gap.
+        result = evaluate(engine, description="You will use Docker daily.")
+        assert not any("docker" in g.lower() for g in result.gaps)
+
+    def test_a_transferable_skill_is_a_credit_rather_than_a_gap(self, engine):
+        # Terraform is deliberately *not* claimed, but Docker and GitHub
+        # Actions are, and infrastructure-as-code is an adjacent family. The
+        # posting should read as partly covered and say which skill covered it,
+        # instead of listing a flat "missing: terraform".
+        result = evaluate(engine, description="You will use Ansible daily.")
+        said = " ".join(result.reasons + result.gaps).lower()
+        assert "ansible" in said
 
     def test_score_is_deterministic(self, engine):
         a = evaluate(engine)

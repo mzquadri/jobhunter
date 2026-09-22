@@ -1,54 +1,114 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Search, SlidersHorizontal, X } from "lucide-react";
+import { toast } from "sonner";
 import {
+  ALL_STATUSES,
   api,
-  ApiError,
+  HIGH_PRIORITY,
   STATUS_LABELS,
-  STATUS_ORDER,
+  WORTH_APPLYING,
   type JobQuery,
   type JobSummary,
-  type SavedSearchOut,
 } from "@/lib/api";
+import { useDebounced, useHotkey, useResource } from "@/lib/hooks";
+import { JobDrawer } from "@/components/jobs/drawer";
+import {
+  FlagBadges,
+  LanguageCell,
+  MatchScore,
+  QuickActions,
+  SalaryCell,
+  StatusBadge,
+  type RowPatch,
+} from "@/components/jobs/shared";
 import {
   Badge,
   Button,
+  Card,
   EmptyState,
+  ErrorState,
   Input,
+  Page,
   Select,
-  Separator,
-  Skeleton,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
+  TableSkeleton,
+  Tabs,
 } from "@/components/ui/primitives";
-import {
-  JobTitleCell,
-  SalaryCell,
-  Score,
-  StarButton,
-  StatusBadge,
-} from "@/components/jobs/bits";
 import { cn, postedAge } from "@/lib/utils";
 
-const SEARCH_DEBOUNCE_MS = 250;
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 150;
 
 /**
- * The subset of JobPatch the table can change inline.
+ * One-click views, grouped so they compose instead of fighting.
  *
- * Narrower than JobPatch on purpose: the full patch type allows null on every
- * field (they are all optional server-side), which would widen a JobSummary's
- * non-nullable columns when spread into it optimistically.
+ * Each group owns exactly one query key. Picking "Germany" replaces
+ * "Switzerland" because a role is in one country; picking "Munich" alongside
+ * "80%+" keeps both because they are different questions. The old flat list
+ * made every chip toggle independently, so clicking two of them silently
+ * produced a filter nobody asked for.
  */
-type RowPatch = Partial<Pick<JobSummary, "starred" | "hidden" | "status">>;
+type QuickView = { id: string; label: string; key: keyof JobQuery; value: unknown };
 
-const LANGUAGES = [
+const QUICK_GROUPS: { group: string; views: QuickView[] }[] = [
+  {
+    group: "match",
+    views: [
+      { id: "worth", label: "60%+ Worth applying", key: "min_score", value: WORTH_APPLYING },
+      { id: "high", label: "80%+", key: "min_score", value: HIGH_PRIORITY },
+    ],
+  },
+  {
+    group: "freshness",
+    views: [
+      { id: "new", label: "New", key: "only_new", value: true },
+      { id: "today", label: "Today", key: "max_age_days", value: 1 },
+      { id: "3d", label: "3 days", key: "max_age_days", value: 3 },
+    ],
+  },
+  {
+    group: "place",
+    views: [
+      { id: "munich", label: "Munich", key: "city", value: "munich" },
+      { id: "de", label: "Germany", key: "country", value: "de" },
+      { id: "ch", label: "Switzerland", key: "country", value: "ch" },
+      { id: "at", label: "Austria", key: "country", value: "at" },
+      { id: "nl", label: "Netherlands", key: "country", value: "nl" },
+    ],
+  },
+  {
+    group: "language",
+    views: [{ id: "english", label: "English-first", key: "language", value: "english_only" }],
+  },
+  {
+    group: "field",
+    views: [
+      { id: "ai", label: "AI / LLM", key: "category", value: "Generative AI" },
+      { id: "cv", label: "Computer Vision", key: "category", value: "Computer Vision" },
+      { id: "robotics", label: "Robotics", key: "domain", value: "robotics" },
+      { id: "automotive", label: "Automotive", key: "domain", value: "automotive" },
+      { id: "aerospace", label: "Aerospace", key: "domain", value: "aerospace" },
+    ],
+  },
+  {
+    group: "mine",
+    views: [
+      { id: "dream", label: "Dream companies", key: "tier", value: "dream" },
+      { id: "saved", label: "Saved", key: "only_starred", value: true },
+    ],
+  },
+];
+
+const QUICK: QuickView[] = QUICK_GROUPS.flatMap((g) => g.views);
+
+const LANGUAGES: [string, string][] = [
   ["english_only", "English only"],
   ["english_preferred", "English preferred"],
   ["german_optional", "German optional"],
@@ -58,230 +118,258 @@ const LANGUAGES = [
   ["german_c1_plus", "German C1+"],
   ["german_native", "German native"],
   ["unclear", "Not stated"],
-] as const;
+];
 
 export function JobExplorer() {
   const params = useSearchParams();
+  const router = useRouter();
+
+  // Arriving with no filters at all opens on the roles worth applying to
+  // rather than on everything ever stored. Storage keeps a 43 in case a later
+  // setting change makes it a 67; the opening view is for deciding what to do
+  // today. Any link that names its own filters is honoured untouched, and the
+  // threshold chip is visibly on, so this is a default rather than a trap.
+  const untouched = Array.from(params.keys()).every((k) => k === "open");
 
   const [query, setQuery] = useState<JobQuery>(() => ({
     sort: (params.get("sort") as JobQuery["sort"]) ?? "newest",
     only_new: params.get("only_new") === "true" || undefined,
-    min_score: params.get("min_score") ? Number(params.get("min_score")) : undefined,
-    status: (params.get("status") as JobQuery["status"]) ?? undefined,
+    only_starred: params.get("only_starred") === "true" || undefined,
+    min_score: params.get("min_score")
+      ? Number(params.get("min_score"))
+      : untouched
+        ? WORTH_APPLYING
+        : undefined,
+    max_age_days: params.get("max_age_days") ? Number(params.get("max_age_days")) : undefined,
     country: (params.get("country") as JobQuery["country"]) ?? undefined,
+    tier: params.get("tier") ?? undefined,
+    language: params.get("language") ?? undefined,
+    status: (params.get("status") as JobQuery["status"]) ?? undefined,
+    company: params.get("company") ?? undefined,
+    city: params.get("city") ?? undefined,
+    category: params.get("category") ?? undefined,
+    domain: params.get("domain") ?? undefined,
     limit: PAGE_SIZE,
   }));
 
-  const [text, setText] = useState("");
-  const [jobs, setJobs] = useState<JobSummary[]>([]);
-  const [total, setTotal] = useState(0);
-  const [searches, setSearches] = useState<SavedSearchOut[]>([]);
-  const [activeSearch, setActiveSearch] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [text, setText] = useState(params.get("q") ?? "");
+  const debounced = useDebounced(text, 250);
+  const [view, setView] = useState<"table" | "cards">("table");
   const [showFilters, setShowFilters] = useState(false);
+  const [openJob, setOpenJob] = useState<string | null>(params.get("open"));
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // One request per pause in typing, not one per keystroke.
-  useEffect(() => {
-    const id = setTimeout(
-      () => setQuery((q) => ({ ...q, q: text.trim() || undefined })),
-      SEARCH_DEBOUNCE_MS,
-    );
-    return () => clearTimeout(id);
-  }, [text]);
+  useHotkey("/", () => searchRef.current?.focus());
 
-  useEffect(() => {
-    api.searches().then(setSearches).catch(() => setSearches([]));
-  }, []);
+  const effective = useMemo(
+    () => ({ ...query, q: debounced.trim() || undefined }),
+    [query, debounced],
+  );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const page = activeSearch
-        ? await api.searchResults(activeSearch, PAGE_SIZE)
-        : await api.jobs(query);
-      setJobs(page.items);
-      setTotal(page.total);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not load jobs.");
-    } finally {
-      setLoading(false);
-    }
-  }, [query, activeSearch]);
+  const { data, error, loading, refresh, setData } = useResource(
+    () => api.jobs(effective),
+    [JSON.stringify(effective)],
+  );
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const jobs = data?.items ?? [];
 
   const patch = useCallback(
     async (job: JobSummary, changes: RowPatch) => {
-      // Optimistic: the round trip is short, but the click should feel instant.
-      setJobs((prev) =>
-        changes.hidden
-          ? prev.filter((j) => j.id !== job.id)
-          : prev.map((j) => (j.id === job.id ? { ...j, ...changes } : j)),
+      // Optimistic: the round trip is short, the click should feel instant.
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              items: changes.hidden
+                ? prev.items.filter((j) => j.id !== job.id)
+                : prev.items.map((j) => (j.id === job.id ? { ...j, ...changes } : j)),
+              total: changes.hidden ? prev.total - 1 : prev.total,
+            }
+          : prev,
       );
       try {
         await api.updateJob(job.id, changes);
+        if (changes.hidden) toast.success("Ignored", { description: job.title });
+        else if (changes.starred !== undefined)
+          toast.success(changes.starred ? "Saved" : "Removed from saved");
       } catch {
-        setError("That change did not save.");
-        void load();
+        toast.error("That change did not save.");
+        void refresh(true);
       }
     },
-    [load],
+    [refresh, setData],
   );
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "/" && document.activeElement?.tagName !== "INPUT") {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  function update<K extends keyof JobQuery>(key: K, value: JobQuery[K]) {
-    setActiveSearch(null);
+  function set<K extends keyof JobQuery>(key: K, value: JobQuery[K]) {
     setQuery((q) => ({ ...q, [key]: value || undefined }));
   }
 
-  const activeFilterCount = useMemo(
-    () =>
-      Object.entries(query).filter(
-        ([k, v]) => !["sort", "limit", "q"].includes(k) && v !== undefined && v !== false,
-      ).length,
-    [query],
-  );
+  function toggleQuick(id: string) {
+    const item = QUICK.find((q) => q.id === id);
+    if (!item) return;
+    setQuery((q) => ({
+      ...q,
+      // Clicking an active chip clears it; clicking a different chip in the
+      // same group replaces it, because one key holds one answer.
+      [item.key]: q[item.key] === item.value ? undefined : item.value,
+    }));
+  }
+
+  function isQuickActive(item: QuickView) {
+    return query[item.key] === item.value;
+  }
+
+  const activeFilters = Object.entries(query).filter(
+    ([k, v]) => !["sort", "limit"].includes(k) && v !== undefined && v !== false,
+  ).length;
+
+  function clearAll() {
+    setQuery({ sort: query.sort, limit: PAGE_SIZE });
+    setText("");
+  }
 
   return (
-    <div className="flex flex-col">
-      {/* saved searches */}
-      {searches.length > 0 && (
-        <div className="flex gap-1.5 overflow-x-auto border-b border-border px-6 py-2 scrollbar-thin">
-          {searches.map((s) => (
-            <Button
-              key={s.id}
-              size="sm"
-              variant={activeSearch === s.id ? "default" : "outline"}
-              title={s.description}
-              onClick={() => {
-                setActiveSearch(activeSearch === s.id ? null : s.id);
-                setText("");
-              }}
-            >
-              {s.pinned && "★ "}
-              {s.name}
-            </Button>
-          ))}
-        </div>
-      )}
+    <>
+      {/* Quick views, separated by group so the bar reads as several small
+          decisions rather than one long undifferentiated row of chips. */}
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-border px-5 py-2 scrollbar-thin">
+        {QUICK_GROUPS.map((group, index) => (
+          <div key={group.group} className="flex shrink-0 items-center gap-1">
+            {index > 0 && <span className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden />}
+            {group.views.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => toggleQuick(item.id)}
+                aria-pressed={isQuickActive(item)}
+                className={cn(
+                  "shrink-0 rounded-md border px-2.5 py-1 text-[12px] transition-colors",
+                  isQuickActive(item)
+                    ? "border-foreground bg-foreground font-medium text-background"
+                    : "border-border text-muted-foreground hover:border-ring/50 hover:text-foreground",
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
 
       {/* controls */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-6 py-3">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-2.5">
         <div className="relative min-w-52 flex-1">
-          <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             ref={searchRef}
             value={text}
-            onChange={(e) => {
-              setActiveSearch(null);
-              setText(e.target.value);
-            }}
-            placeholder="Search company, role, skill or city   (press /)"
-            className="pl-8"
-            aria-label="Search postings"
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Search role, company, skill or city   (press /)"
+            className="h-8 pl-8 text-[13px]"
+            aria-label="Search jobs"
           />
         </div>
 
         <Select
           value={query.sort ?? "newest"}
-          onChange={(e) => update("sort", e.target.value as JobQuery["sort"])}
-          aria-label="Sort order"
+          onChange={(e) => set("sort", e.target.value as JobQuery["sort"])}
+          className="h-8 text-[12px]"
+          aria-label="Sort"
         >
           <option value="newest">Newest posted</option>
-          <option value="discovered">Newest discovered</option>
+          <option value="discovered">Newest found</option>
           <option value="score">Best match</option>
           <option value="salary">Highest salary</option>
           <option value="company">Company</option>
         </Select>
 
         <Button
-          variant={showFilters ? "default" : "outline"}
+          variant={showFilters ? "secondary" : "outline"}
           size="sm"
           onClick={() => setShowFilters((v) => !v)}
         >
           <SlidersHorizontal />
           Filters
-          {activeFilterCount > 0 && <Badge variant="info">{activeFilterCount}</Badge>}
+          {activeFilters > 0 && <Badge variant="info">{activeFilters}</Badge>}
         </Button>
 
-        <span className="tabular ml-auto text-xs text-muted-foreground">
-          {loading ? "…" : `${total} ${total === 1 ? "posting" : "postings"}`}
-        </span>
+        {activeFilters > 0 && (
+          <Button variant="ghost" size="sm" onClick={clearAll}>
+            <X /> Clear
+          </Button>
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          <span className="tabular text-[11px] text-muted-foreground">
+            {loading ? "…" : `${data?.total ?? 0} roles`}
+          </span>
+          <Tabs
+            value={view}
+            onChange={(v) => setView(v as "table" | "cards")}
+            options={[
+              { value: "table", label: "Table" },
+              { value: "cards", label: "Cards" },
+            ]}
+          />
+        </div>
       </div>
 
-      {showFilters && (
-        <FilterBar query={query} onChange={update} onClear={() => setQuery({ sort: query.sort, limit: PAGE_SIZE })} />
-      )}
+      {showFilters && <FilterPanel query={query} onChange={set} />}
 
-      {error && (
-        <p className="border-b border-danger/30 bg-danger-soft px-6 py-2 text-xs text-danger">
-          {error}
-        </p>
-      )}
-
-      {/* results */}
-      <div className="px-6 py-4">
-        {loading && jobs.length === 0 ? (
-          <div className="space-y-2">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <Skeleton key={i} className="h-12 w-full" />
-            ))}
-          </div>
+      <Page>
+        {error ? (
+          <ErrorState
+            title={error.isOffline ? "Cannot reach the backend" : "Could not load jobs"}
+            message={error.message}
+            retry={() => void refresh()}
+          />
+        ) : loading && jobs.length === 0 ? (
+          <TableSkeleton rows={10} />
         ) : jobs.length === 0 ? (
           <EmptyState
             title="Nothing matches"
-            hint="Clear the search or widen the filters. The worker sweeps every hour, so new postings appear on their own."
+            hint="Clear a filter or widen the search. CareerOS scans every hour, so new roles appear on their own."
             action={
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setText("");
-                  setActiveSearch(null);
-                  setQuery({ sort: "newest", limit: PAGE_SIZE });
-                }}
-              >
-                Reset
+              <Button variant="outline" size="sm" onClick={clearAll}>
+                Reset filters
               </Button>
             }
           />
+        ) : view === "table" ? (
+          <JobTable jobs={jobs} onOpen={setOpenJob} onPatch={patch} />
         ) : (
-          <JobTable jobs={jobs} onPatch={patch} />
+          <JobCards jobs={jobs} onOpen={setOpenJob} onPatch={patch} />
         )}
-      </div>
-    </div>
+      </Page>
+
+      <JobDrawer
+        jobId={openJob}
+        onClose={() => setOpenJob(null)}
+        onChanged={(updated) => {
+          setData((prev) =>
+            prev
+              ? { ...prev, items: prev.items.map((j) => (j.id === updated.id ? { ...j, ...updated } : j)) }
+              : prev,
+          );
+          router.refresh();
+        }}
+      />
+    </>
   );
 }
 
-function FilterBar({
+function FilterPanel({
   query,
   onChange,
-  onClear,
 }: {
   query: JobQuery;
   onChange: <K extends keyof JobQuery>(key: K, value: JobQuery[K]) => void;
-  onClear: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-6 py-3">
+    <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-5 py-2.5">
       <Select
         value={query.country ?? ""}
         onChange={(e) => onChange("country", (e.target.value || undefined) as JobQuery["country"])}
+        className="h-8 text-[12px]"
         aria-label="Country"
       >
         <option value="">Any country</option>
@@ -295,16 +383,19 @@ function FilterBar({
       <Select
         value={query.tier ?? ""}
         onChange={(e) => onChange("tier", e.target.value || undefined)}
-        aria-label="Employer tier"
+        className="h-8 text-[12px]"
+        aria-label="Employer priority"
       >
         <option value="">Any employer</option>
-        <option value="dream">Shortlist only</option>
+        <option value="dream">Shortlist</option>
         <option value="high">High priority</option>
+        <option value="normal">Normal</option>
       </Select>
 
       <Select
         value={query.language ?? ""}
         onChange={(e) => onChange("language", e.target.value || undefined)}
+        className="h-8 text-[12px]"
         aria-label="Language requirement"
       >
         <option value="">Any language requirement</option>
@@ -318,21 +409,36 @@ function FilterBar({
       <Select
         value={query.remote ?? ""}
         onChange={(e) => onChange("remote", e.target.value || undefined)}
-        aria-label="Work arrangement"
+        className="h-8 text-[12px]"
+        aria-label="Work mode"
       >
-        <option value="">Any arrangement</option>
+        <option value="">Any work mode</option>
         <option value="remote">Remote</option>
         <option value="hybrid">Hybrid</option>
         <option value="onsite">On-site</option>
       </Select>
 
       <Select
+        value={query.seniority ?? ""}
+        onChange={(e) => onChange("seniority", e.target.value || undefined)}
+        className="h-8 text-[12px]"
+        aria-label="Level"
+      >
+        <option value="">Any level</option>
+        <option value="graduate">Graduate</option>
+        <option value="junior">Junior</option>
+        <option value="mid">Mid</option>
+        <option value="senior">Senior</option>
+      </Select>
+
+      <Select
         value={query.status ?? ""}
         onChange={(e) => onChange("status", (e.target.value || undefined) as JobQuery["status"])}
+        className="h-8 text-[12px]"
         aria-label="Application status"
       >
         <option value="">Any status</option>
-        {STATUS_ORDER.map((s) => (
+        {ALL_STATUSES.map((s) => (
           <option key={s} value={s}>
             {STATUS_LABELS[s]}
           </option>
@@ -342,28 +448,30 @@ function FilterBar({
       <Select
         value={query.min_score?.toString() ?? ""}
         onChange={(e) => onChange("min_score", e.target.value ? Number(e.target.value) : undefined)}
+        className="h-8 text-[12px]"
         aria-label="Minimum match"
       >
         <option value="">Any match</option>
-        <option value="80">80 and above</option>
-        <option value="70">70 and above</option>
-        <option value="60">60 and above</option>
+        <option value="90">90+</option>
+        <option value="80">80+</option>
+        <option value="70">70+</option>
+        <option value="60">60+</option>
       </Select>
 
       <Select
-        value={query.max_age_days?.toString() ?? ""}
-        onChange={(e) =>
-          onChange("max_age_days", e.target.value ? Number(e.target.value) : undefined)
-        }
-        aria-label="Posting age"
+        value={query.salary_min?.toString() ?? ""}
+        onChange={(e) => onChange("salary_min", e.target.value ? Number(e.target.value) : undefined)}
+        className="h-8 text-[12px]"
+        aria-label="Minimum stated salary"
+        title="Only roles where the employer actually printed a figure can be compared"
       >
-        <option value="">Any age</option>
-        <option value="1">Posted today</option>
-        <option value="3">Last 3 days</option>
-        <option value="7">Last 7 days</option>
+        <option value="">Any salary</option>
+        <option value="60000">€60k+ stated</option>
+        <option value="70000">€70k+ stated</option>
+        <option value="80000">€80k+ stated</option>
       </Select>
 
-      <label className="flex items-center gap-1.5 text-xs">
+      <label className="flex items-center gap-1.5 text-[12px]">
         <input
           type="checkbox"
           checked={query.only_clean ?? false}
@@ -371,102 +479,141 @@ function FilterBar({
         />
         No warnings
       </label>
-      <label className="flex items-center gap-1.5 text-xs">
-        <input
-          type="checkbox"
-          checked={query.only_starred ?? false}
-          onChange={(e) => onChange("only_starred", e.target.checked || undefined)}
-        />
-        Starred
-      </label>
-
-      <Button variant="ghost" size="sm" onClick={onClear}>
-        <X />
-        Clear
-      </Button>
     </div>
   );
 }
 
 function JobTable({
   jobs,
+  onOpen,
   onPatch,
 }: {
   jobs: JobSummary[];
+  onOpen: (id: string) => void;
   onPatch: (job: JobSummary, changes: RowPatch) => void;
 }) {
   return (
-    <div className="rounded-lg border border-border">
+    <Card className="overflow-hidden">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead className="w-12 text-right">Match</TableHead>
-            <TableHead className="min-w-64">Position</TableHead>
-            <TableHead className="min-w-36">Company</TableHead>
-            <TableHead className="min-w-32">Location</TableHead>
-            <TableHead className="w-28">Language</TableHead>
+            <TableHead className="min-w-[19rem]">Role</TableHead>
+            <TableHead className="w-40">Company</TableHead>
+            <TableHead className="w-36">Location</TableHead>
+            <TableHead className="w-20">Mode</TableHead>
             <TableHead className="w-24">Salary</TableHead>
+            <TableHead className="w-28">Language</TableHead>
+            <TableHead className="w-20">Level</TableHead>
             <TableHead className="w-20">Posted</TableHead>
+            <TableHead className="w-24">Source</TableHead>
             <TableHead className="w-24">Status</TableHead>
-            <TableHead className="w-10" />
+            <TableHead className="w-24" />
           </TableRow>
         </TableHeader>
         <TableBody>
           {jobs.map((job) => (
-            <TableRow key={job.id}>
+            <TableRow
+              key={job.id}
+              onClick={() => onOpen(job.id)}
+              className="cursor-pointer"
+            >
               <TableCell className="text-right">
-                <Score value={job.score} />
+                <MatchScore score={job.score} />
               </TableCell>
               <TableCell>
-                <JobTitleCell job={job} />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="truncate text-[13px] font-medium">{job.title}</span>
+                  {job.is_new && <Badge variant="info">New</Badge>}
+                  {job.tier === "dream" && <Badge variant="outline">◆</Badge>}
+                  <FlagBadges flags={job.flags} />
+                </div>
               </TableCell>
-              <TableCell className="text-sm">{job.company_name}</TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                <span className="block truncate">
-                  {job.city || job.location_raw || "—"}
-                </span>
-                {job.remote_policy !== "unknown" && (
-                  <span className="text-[11px]">{job.remote_label}</span>
-                )}
+              <TableCell className="truncate text-[12.5px]">{job.company_name}</TableCell>
+              <TableCell className="truncate text-[11.5px] text-muted-foreground">
+                {job.city || job.location_raw || "—"}
               </TableCell>
-              <TableCell>
-                <span
-                  className={cn(
-                    "text-xs",
-                    job.language_requirement.startsWith("german_b")
-                      || job.language_requirement.startsWith("german_c")
-                      || job.language_requirement === "german_native"
-                      ? "text-warn"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  {job.language_label}
-                </span>
+              <TableCell className="text-[11px] text-muted-foreground">
+                {job.remote_label === "Not stated" ? "—" : job.remote_label}
               </TableCell>
               <TableCell>
                 <SalaryCell job={job} />
               </TableCell>
-              <TableCell className="tabular text-xs text-muted-foreground">
+              <TableCell>
+                <LanguageCell job={job} />
+              </TableCell>
+              <TableCell className="text-[11px] text-muted-foreground">
+                {job.seniority_label === "Not stated" ? "—" : job.seniority_label}
+              </TableCell>
+              <TableCell className="tabular text-[11.5px] text-muted-foreground">
                 {postedAge(job.age_days, job.posted_at)}
+              </TableCell>
+              <TableCell className="truncate text-[11px] text-muted-foreground">
+                {job.source}
               </TableCell>
               <TableCell>
                 <StatusBadge status={job.status} />
               </TableCell>
-              <TableCell>
-                <StarButton
-                  starred={job.starred}
-                  onToggle={() => onPatch(job, { starred: !job.starred })}
-                />
+              <TableCell onClick={(e) => e.stopPropagation()}>
+                <QuickActions job={job} onPatch={(c) => onPatch(job, c)} />
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
-      <Separator />
-      <p className="px-3 py-2 text-[11px] text-muted-foreground">
-        Salary is shown only when the employer stated it. A “≈” marks a figure that was
+      <p className="border-t border-border px-3 py-2 text-[10.5px] text-muted-foreground">
+        Salary is shown only where the employer stated it. “≈” marks a figure that was
         annualised or converted from another currency.
       </p>
+    </Card>
+  );
+}
+
+function JobCards({
+  jobs,
+  onOpen,
+  onPatch,
+}: {
+  jobs: JobSummary[];
+  onOpen: (id: string) => void;
+  onPatch: (job: JobSummary, changes: RowPatch) => void;
+}) {
+  return (
+    <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
+      {jobs.map((job) => (
+        <Card
+          key={job.id}
+          onClick={() => onOpen(job.id)}
+          className="cursor-pointer p-3 transition-colors hover:border-ring/40"
+        >
+          <div className="flex items-start gap-2.5">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {job.is_new && <Badge variant="info">New</Badge>}
+                {job.tier === "dream" && <Badge variant="outline">Shortlist</Badge>}
+                <FlagBadges flags={job.flags} />
+              </div>
+              <h3 className="mt-1 truncate text-[13px] font-medium">{job.title}</h3>
+              <p className="text-[11.5px] text-muted-foreground">{job.company_name}</p>
+            </div>
+            <MatchScore score={job.score} />
+          </div>
+
+          <div className="mt-2 flex flex-wrap gap-x-2.5 gap-y-0.5 text-[11px] text-muted-foreground">
+            <span>{job.city || job.location_raw || "—"}</span>
+            {job.remote_label !== "Not stated" && <span>{job.remote_label}</span>}
+            <span>{postedAge(job.age_days, job.posted_at)}</span>
+            {job.salary.display && <span className="tabular">{job.salary.display}</span>}
+          </div>
+
+          <div className="mt-2 flex items-center gap-1.5">
+            <LanguageCell job={job} />
+            <span className="ml-auto" onClick={(e) => e.stopPropagation()}>
+              <QuickActions job={job} onPatch={(c) => onPatch(job, c)} />
+            </span>
+          </div>
+        </Card>
+      ))}
     </div>
   );
 }

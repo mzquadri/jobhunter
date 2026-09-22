@@ -188,6 +188,49 @@ class CompanyOut(BaseModel):
     notes: str = ""
     is_automated: bool = False
 
+    # ---- structure and honesty ------------------------------------------
+    country: str = ""
+    parent_id: str | None = None
+    parent_name: str = ""
+    aliases: list[str] = []
+    #: live / idle / degraded / rate_limited / manual / broken.
+    source_status: str = "manual"
+    verified_at: datetime | None = None
+    #: The board this employer arrived through, if nobody configured them.
+    discovered_from: str = ""
+    #: Roles at or above the recommend threshold. The number that decides
+    #: whether opening this employer is worth the click.
+    worth_applying: int = 0
+    best_score: int = 0
+
+
+class CoverageBucket(BaseModel):
+    key: str
+    label: str
+    companies: int
+    automated: int
+    manual: int
+    open_roles: int
+
+
+class Coverage(BaseModel):
+    """What discovery actually reaches, stated without rounding up.
+
+    Every count here is of rows in the companies table, split by whether
+    anything has ever successfully fetched from them. "Tracked" is not
+    "monitored": the difference is the whole point of the section.
+    """
+
+    tracked: int
+    automated: int
+    manual: int
+    by_status: dict[str, int]
+    by_industry: list[CoverageBucket]
+    by_country: list[CoverageBucket]
+    providers: list[CoverageBucket]
+    discovered_by_boards: int
+    last_scan_at: datetime | None = None
+
 
 # ---------------------------------------------------------------------------
 # runs
@@ -331,6 +374,20 @@ class Stats(BaseModel):
     max_age_days: int
     headline: str
 
+    # The thresholds the interface must agree with. Sent rather than hard-coded
+    # in the frontend so changing "worth applying" in Settings moves the
+    # dashboard, the explorer's default view and the counts below together.
+    recommend_min_score: int = 60
+    high_match_score: int = 80
+
+    # What the morning view is actually built from: everything at or above the
+    # recommend line, split at the high-match line, plus where they are.
+    worth_applying: int = 0
+    worth_applying_new: int = 0
+    new_in_priority_city: int = 0
+    priority_city: str = ""
+    dream_company_open: int = 0
+
     charts: Charts
     last_run: RunOut | None
     next_run_at: datetime | None
@@ -346,3 +403,109 @@ def label_job(job: JobSummary) -> JobSummary:
     job.seniority_label = SENIORITY_LABELS.get(job.seniority, "Not stated")
     job.remote_label = REMOTE_LABELS.get(job.remote_policy, "Not stated")
     return job
+
+
+# ---------------------------------------------------------------------------
+# product surfaces
+# ---------------------------------------------------------------------------
+class NotificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    kind: str
+    title: str
+    body: str
+    href: str
+    severity: str
+    job_id: str | None = None
+    company_id: str | None = None
+    read_at: datetime | None = None
+    created_at: datetime
+
+
+class NotificationPage(BaseModel):
+    items: list[NotificationOut]
+    unread: int
+
+
+class ScanStateOut(BaseModel):
+    """What the scan is doing, for the top bar and the automation screen.
+
+    Progress is reported as sources completed, never as a percentage of time:
+    the backend knows how many sources answered, and inventing a smooth bar
+    would be a lie about information it does not have.
+    """
+
+    running: bool
+    run_id: int | None = None
+    started_at: datetime | None = None
+    triggered_by: str = ""
+    providers_done: int = 0
+    providers_total: int = 0
+    postings_seen: int = 0
+    next_run_at: datetime | None = None
+    last_finished_at: datetime | None = None
+    last_status: str = ""
+
+
+class SettingsOut(BaseModel):
+    profile: dict
+    onboarded: bool
+    seeded_from: str
+    updated_at: datetime
+
+
+class SettingsPatch(BaseModel):
+    """A partial update. Nested sections merge; lists replace."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class OnboardingState(BaseModel):
+    onboarded: bool
+    has_jobs: bool
+    has_run: bool
+
+
+class SalaryBand(BaseModel):
+    label: str
+    count: int
+    floor: int
+
+
+class FunnelStage(BaseModel):
+    key: str
+    label: str
+    count: int
+
+
+class Analytics(BaseModel):
+    """Aggregates for the analytics screen.
+
+    Only measures that change a decision. Counts of things that always go up
+    were deliberately left out.
+    """
+
+    discovered_by_day: list[DayCount]
+    by_country: list[NamedCount]
+    by_category: list[NamedCount]
+    by_company: list[NamedCount]
+    by_language: list[NamedCount]
+    by_seniority: list[NamedCount]
+    by_source: list[NamedCount]
+    score_distribution: list[NamedCount]
+    freshness_distribution: list[NamedCount]
+    salary_bands: list[SalaryBand]
+    salary_coverage: float
+    funnel: list[FunnelStage]
+    totals: dict[str, int]
+
+
+class CompanyPatch(BaseModel):
+    """What the user may change about an employer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tier: Literal["dream", "high", "normal", "ignored"] | None = None
+    enabled: bool | None = None
+    notes: Annotated[str, Field(max_length=5_000)] | None = None

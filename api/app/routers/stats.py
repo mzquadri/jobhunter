@@ -5,19 +5,19 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
+from app.deps import profile_dep
 from app.enrich.language import LANGUAGE_LABELS
 from app.models import PENDING_STATUSES, ApplicationStatus, Company, Job, Run
 from app.models.base import RunStatus
 from app.schemas import Charts, CompanyOut, DayCount, NamedCount, RunOut, Stats
-from app.settings import Profile, get_profile
+from app.services import scans
+from app.settings import Profile
 
 router = APIRouter(prefix="/api", tags=["stats"])
-
-HIGH_MATCH = 70
 
 
 def _open(*conditions):
@@ -29,7 +29,7 @@ def _open(*conditions):
 @router.get("/stats", response_model=Stats, summary="Dashboard overview and charts")
 def stats(
     session: Session = Depends(get_session),
-    profile: Profile = Depends(get_profile),
+    profile: Profile = Depends(profile_dep),
 ) -> Stats:
     today = date.today()
     window = profile.max_age_days
@@ -39,7 +39,9 @@ def stats(
         _open(func.date(Job.first_seen_at) == today)
     ) or 0
     new_since = session.scalar(_open(Job.is_new.is_(True))) or 0
-    high_match = session.scalar(_open(Job.score >= HIGH_MATCH)) or 0
+    # One definition of 'high match', read from settings, so the stat tile,
+    # the explorer filter and the signals cannot drift apart.
+    high_match = session.scalar(_open(Job.score >= profile.high_match_score)) or 0
     average = session.scalar(
         select(func.avg(Job.score)).where(Job.is_open.is_(True), Job.hidden.is_(False))
     )
@@ -57,17 +59,47 @@ def stats(
         .where(Job.is_open.is_(True), Job.hidden.is_(False))
     ) or 0
 
+    # The morning view's own numbers, counted with the thresholds the user set
+    # rather than constants the frontend guessed at.
+    recommend = profile.recommend_min_score
+    worth_applying = session.scalar(_open(Job.score >= recommend)) or 0
+    worth_applying_new = session.scalar(
+        _open(Job.score >= recommend, Job.is_new.is_(True))
+    ) or 0
+
+    # Tier-1 cities, as configured. The label is whichever name the user put
+    # first, so the interface says "Munich" because they wrote Munich.
+    top_tier = max(profile.location_tiers, default=None) if profile.location_tiers else None
+    priority_places = list(profile.location_tiers.get(top_tier, [])) if top_tier else []
+    priority_city = priority_places[0].title() if priority_places else ""
+    new_in_priority_city = 0
+    if priority_places:
+        new_in_priority_city = session.scalar(
+            _open(
+                Job.is_new.is_(True),
+                or_(*[Job.city.ilike(f"%{place}%") for place in priority_places[:12]]),
+            )
+        ) or 0
+
+    dream_ids = [
+        c.id for c in session.scalars(select(Company).where(Company.tier == "dream")).all()
+    ]
+    dream_company_open = 0
+    if dream_ids:
+        dream_company_open = session.scalar(
+            _open(Job.company_id.in_(dream_ids), Job.score >= recommend)
+        ) or 0
+
     last_run = session.scalars(
         select(Run).where(Run.status != RunStatus.RUNNING)
         .order_by(Run.started_at.desc()).limit(1)
     ).first()
 
-    next_run_at = None
-    if last_run and last_run.finished_at:
-        from app.settings import get_settings
-        minutes = get_settings().sweep_interval_minutes
-        if minutes > 0:
-            next_run_at = last_run.started_at + timedelta(minutes=minutes)
+    # Deliberately the same answer /api/scans gives. This used to read the API
+    # process's own SWEEP_INTERVAL_MINUTES, which is 0 so that the API never
+    # scans -- so the overview's "next scan" line was permanently blank while
+    # the worker was scanning happily every hour.
+    next_run_at = scans.scan_state(session).next_run_at
 
     watchlist = session.scalars(
         select(Company).where(Company.adapter.is_(None), Company.enabled.is_(True))
@@ -85,6 +117,13 @@ def stats(
         average_match_score=round(float(average or 0), 1),
         max_age_days=window,
         headline=profile.headline,
+        recommend_min_score=recommend,
+        high_match_score=profile.high_match_score,
+        worth_applying=worth_applying,
+        worth_applying_new=worth_applying_new,
+        new_in_priority_city=new_in_priority_city,
+        priority_city=priority_city,
+        dream_company_open=dream_company_open,
         charts=_charts(session, window),
         last_run=RunOut.model_validate(last_run) if last_run else None,
         next_run_at=next_run_at,
