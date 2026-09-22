@@ -35,12 +35,14 @@ from app.matching import MatchEngine, MatchResult
 from app.models import (
     ApplicationStatus,
     Company,
+    CompanyTier,
     Job,
     JobSource,
     ProviderState,
     Run,
     RunProvider,
     RunStatus,
+    SourceStatus,
     slugify,
     utcnow,
 )
@@ -110,6 +112,10 @@ def run_discovery(
         scored = _score(shortlisted, engine, profile)
         log.info("%d vacancies worth keeping", len(scored))
 
+        # Employers found through a board become real companies before the
+        # jobs are written, so every posting can be linked to one.
+        adopted = adopt_discovered_companies(session, [g for g, _ in scored])
+
         new_ids, updated, closed = _persist(session, scored, profile)
         drafts = _write_drafts(session, scored, new_ids, profile, settings)
         _refresh_company_counts(session)
@@ -126,6 +132,8 @@ def run_discovery(
         run.jobs_closed = closed
         run.drafts_written = drafts
         run.errors_count = sum(1 for r in provider_rows if r.error)
+        if adopted:
+            log.info("%d newly discovered employers now tracked", adopted)
         run.status = RunStatus.PARTIAL if run.errors_count else RunStatus.OK
 
         # Turn what changed into things worth telling the user. Derived
@@ -171,7 +179,93 @@ def sync_companies(session: Session, profile: Profile) -> None:
         row.careers_url = str(entry.get("careers_url") or "")
         row.industry = str(entry.get("industry") or "")
         row.enabled = bool(entry.get("enabled", True))
+        row.country = str(entry.get("country") or "")
+        row.parent_id = slugify(str(entry["parent"])) if entry.get("parent") else None
+        row.aliases = [str(a) for a in (entry.get("aliases") or [])]
+
+        # Source status starts from what is configured and is corrected by what
+        # actually happens: an employer with no adapter is manual and always
+        # will be, and one with an adapter is only "live" once a run has
+        # fetched from it. `apply_health` moves it on from there.
+        #
+        # The `or MANUAL` matters. On a row created a moment ago the column
+        # default has not been applied yet -- SQLAlchemy fills it at flush --
+        # so the attribute is still None, and comparing it against MANUAL
+        # silently left every newly configured employer marked manual.
+        if not row.adapter:
+            row.source_status = SourceStatus.MANUAL
+            row.verified_at = None
+        elif (row.source_status or SourceStatus.MANUAL) == SourceStatus.MANUAL:
+            # Configured, but nothing has been fetched yet. "Idle" is the one
+            # honest starting point; "live" would be a claim we have not earned.
+            row.source_status = SourceStatus.IDLE
     session.commit()
+
+
+def adopt_discovered_companies(session: Session, groups: list[JobGroup]) -> int:
+    """Create company rows for employers that arrived through a job board.
+
+    Without this, a relevant ML role at a Munich company nobody had configured
+    is stored with ``company_id = None``: it never appears under an employer,
+    never gets a tier, and cannot be promoted to the shortlist. The registry is
+    for *targeted* coverage; boards are for *discovery*, and discovery is
+    worthless if what it finds cannot become a first-class employer.
+
+    Matching is by name and by alias, so "BMW AG" from a board resolves to the
+    configured "BMW Group" instead of creating a near-duplicate. Anything
+    genuinely new is created as a normal-tier, manual-source employer with its
+    provenance recorded -- never as automated, because no endpoint is known.
+    """
+    known: dict[str, str] = {}
+    for company in session.scalars(select(Company)).all():
+        known[_match_key(company.name)] = company.id
+        for alias in company.aliases or []:
+            known.setdefault(_match_key(alias), company.id)
+
+    created = 0
+    for group in groups:
+        name = (group.primary.company or "").strip()
+        if not name or _match_key(name) in known:
+            continue
+        company_id = slugify(name)
+        if session.get(Company, company_id) is not None:
+            known[_match_key(name)] = company_id
+            continue
+
+        session.add(Company(
+            id=company_id,
+            name=name[:200],
+            tier=CompanyTier.NORMAL,
+            adapter=None,
+            source_status=SourceStatus.MANUAL,
+            discovered_from=group.primary.provider[:40],
+            careers_url="",
+            enabled=True,
+        ))
+        known[_match_key(name)] = company_id
+        created += 1
+
+    if created:
+        session.commit()
+        log.info("%d employers discovered through boards and added", created)
+    return created
+
+
+def _match_key(name: str) -> str:
+    """Normalise an employer name for comparison.
+
+    Employers are inconsistent about legal suffixes across their own postings
+    -- "Celonis SE", "Celonis", "Celonis GmbH" -- and treating those as three
+    companies fragments the whole company view.
+    """
+    text = (name or "").lower().strip()
+    for suffix in (" se", " ag", " gmbh", " ltd", " ltd.", " limited", " inc",
+                   " inc.", " b.v.", " bv", " nv", " n.v.", " plc", " sa",
+                   " s.a.", " srl", " s.r.l.", " oy", " ab", " as", " a/s",
+                   " kg", " gmbh & co. kg", " group", " holding"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)].strip()
+    return "".join(ch for ch in text if ch.isalnum())
 
 
 def _build_tasks(
@@ -370,7 +464,13 @@ def _persist(
         row.id: row
         for row in session.scalars(select(Job).where(Job.id.in_(seen_ids or {""}))).all()
     }
-    companies = {c.name: c.id for c in session.scalars(select(Company)).all()}
+    # Keyed on the normalised name and every alias, so "BMW AG" from a board
+    # resolves to the configured "BMW Group" rather than going unlinked.
+    companies: dict[str, str] = {}
+    for company in session.scalars(select(Company)).all():
+        companies[_match_key(company.name)] = company.id
+        for alias in company.aliases or []:
+            companies.setdefault(_match_key(alias), company.id)
 
     new_ids: set[str] = set()
     updated = 0
@@ -387,7 +487,7 @@ def _persist(
 
         # ---- run-owned columns -----------------------------------------
         row.company_name = primary.company[:200]
-        row.company_id = companies.get(primary.company)
+        row.company_id = companies.get(_match_key(primary.company))
         row.title = primary.title[:400]
         row.title_normalized = group.key.split("|")[1][:400]
         row.url = primary.url
