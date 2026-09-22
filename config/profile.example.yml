@@ -35,7 +35,20 @@ search:
   # A job no longer found by any source is archived rather than deleted, so
   # reposting patterns stay visible.
   archive_after_days: 30
+  # Three thresholds, and they are deliberately different numbers.
+  #
+  # min_score decides what is *stored*. It stays low: re-scoring happens every
+  # scan, and settings change, so a 43 today can be a 67 after you add a skill
+  # or widen a location tier. Throwing it away to keep the interface tidy would
+  # destroy data that cannot be recovered without re-fetching the whole market.
   min_score: 25
+  # recommend_min_score decides what is *shown by default* — the dashboard,
+  # the explorer's opening view, the "Worth Applying" list. 60, because a role
+  # where you meet roughly 60% of what was described is worth an application.
+  # Recruiters describe an ideal candidate, not a minimum.
+  recommend_min_score: 60
+  # high_match_score is the "drop everything and read this" line.
+  high_match_score: 80
   draft_min_score: 60
   keep_undated: true
   # A preference, never a filter: a role with no stated salary is still shown.
@@ -169,24 +182,37 @@ roles:
 # Skills, grouped. Groups are what let the matcher say "strong PyTorch and
 # deep-learning match" instead of "11 keywords hit".
 # ---------------------------------------------------------------------------
+# What you have actually worked with. Claim only these.
+#
+# It is tempting to list every adjacent technology so more postings "match",
+# and it makes the product worse: a TensorFlow role then looks like a literal
+# hit instead of a transferable one, Kubernetes never appears as a gap, and
+# every score drifts upward until none of them mean anything.
+#
+# Neighbouring technologies belong in app/enrich/equivalence.py, which awards
+# partial credit and says out loud where it came from — "asks for TensorFlow;
+# your PyTorch experience transfers". That is the honest version of the same
+# generosity, and you can see it on the job.
 skills:
-  core_ml: [pytorch, tensorflow, scikit-learn, xgboost, keras, jax,
-            deep learning, machine learning, neural network, transformer,
-            "hugging face", transformers]
-  research: ["graph neural", gnn, uncertainty, bayesian, conformal,
-             calibration, "uncertainty quantification", "probabilistic",
-             "physics-informed", surrogate, "digital twin"]
-  genai: [llm, rag, "retrieval-augmented", embedding, "vector database",
-          qdrant, "knowledge graph", neo4j, ollama, "fine-tuning", lora,
-          peft, langchain, "prompt engineering", "semantic search"]
+  core_ml: [pytorch, scikit-learn, sklearn, "deep learning", "machine learning",
+            "neural network", transformer, transformers, attention,
+            "hugging face", cnn, convolutional]
+  research: ["graph neural", "graph neural network", gnn, uncertainty,
+             bayesian, conformal, "conformal prediction", calibration,
+             "uncertainty quantification", probabilistic, "physics-informed",
+             surrogate, "digital twin", "scientific computing", simulation]
+  genai: [llm, rag, "retrieval-augmented", "retrieval augmented generation",
+          embedding, embeddings, "vector database", "vector search", qdrant,
+          "knowledge graph", neo4j, ollama, "fine-tuning", langchain,
+          "prompt engineering", "semantic search"]
   vision: ["computer vision", opencv, "image segmentation", "object detection",
-           "grad-cam", cnn, "convolutional", ocr]
-  backend: [fastapi, python, "rest api", django, flask, sql, postgresql,
-            mongodb, redis, "spring boot", java, typescript]
-  mlops: [docker, kubernetes, "ci/cd", mlflow, "weights & biases", airflow,
-          kafka, terraform, "github actions", prometheus, grafana, minio]
-  data: [pandas, numpy, spark, "data pipeline", etl, dbt, "time series",
-         forecasting, "feature engineering"]
+           "medical imaging", "grad-cam", ocr, "image processing"]
+  backend: [fastapi, python, "rest api", sql, postgresql, redis, typescript,
+            "next.js", api, backend, microservices]
+  mlops: [docker, "ci/cd", mlflow, "weights & biases", kafka,
+          "github actions", minio, mlops, "model deployment"]
+  data: [pandas, numpy, "data pipeline", etl, "time series", "time-series",
+         forecasting, "feature engineering", "data science"]
 
 domains:
   [automotive, vehicle, car, mobility, autonomous, adas, aerospace, aviation,
@@ -225,6 +251,18 @@ scoring:
     senior: 30
     lead: 45
     executive: 60
+
+  # Subtracted from the total, on top of the language sub-score.
+  #
+  # A language requirement past your own is not a missing nice-to-have: it
+  # decides whether an application can succeed at all. Language is 13% of the
+  # weighted sum, so dropping that sub-score from 60 to 8 moved a total by
+  # seven points and left roles demanding negotiation-level German sitting in
+  # "Good Match". These say it properly.
+  language_penalty:
+    german_b2: 8
+    german_c1_plus: 22
+    german_native: 30
 
   # Freshness curve: (max age in days, sub-score). The first 48 hours matter
   # more than anything else, so it is steep rather than a polite bonus.

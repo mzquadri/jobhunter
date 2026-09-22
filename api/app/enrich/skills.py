@@ -12,8 +12,9 @@ PyTorch" is a reason a human can check in one second.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
+
+from app.enrich.terms import term_pattern
 
 
 @dataclass
@@ -30,24 +31,10 @@ class SkillVerdict:
         return max(self.by_group.items(), key=lambda kv: len(kv[1]))[0]
 
 
-# An escaped space or escaped hyphen, as produced by re.escape.
-_ESCAPED_SEPARATOR = re.compile(r"\\[ \-]")
-
-
-def _compile(term: str) -> re.Pattern[str]:
-    r"""A term matcher tolerant of the separators employers actually use.
-
-    'ci/cd' has to match 'CI/CD', 'CI-CD' and 'CI CD'; 'scikit-learn' has to
-    match 'scikit learn'. Word boundaries are hand-rolled because '+' and '/'
-    are not word characters, so \b does the wrong thing around 'c++'.
-
-    Substitution happens in a single pass on purpose. Chaining
-    ``.replace(r"\ ", ...).replace(r"\-", ...)`` looks equivalent but is not:
-    the first replacement inserts a hyphen into the character class, which the
-    second then rewrites, corrupting every multi-word term.
-    """
-    pattern = _ESCAPED_SEPARATOR.sub(lambda _: r"[\s\-_/]+", re.escape(term))
-    return re.compile(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", re.I)
+#: Compiling a term now lives in one place. See :mod:`app.enrich.terms` for
+#: why: the substitution is easy to rewrite as a chained ``.replace``, which
+#: corrupts every multi-word term without raising anything.
+_compile = term_pattern
 
 
 class SkillExtractor:
