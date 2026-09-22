@@ -349,6 +349,83 @@ class TestScanCadence:
         assert _is_due(self._company(CompanyTier.NORMAL, naive), now)
 
 
+class TestARunOnlyClosesWhatItLookedAt:
+    """The bug tiered cadence introduced, and must never reintroduce.
+
+    Closing every open job not seen this run was correct while every source was
+    asked every time. With a cadence it is catastrophic: a normal-tier employer
+    is asked every four hours, so on the runs in between all of their still-open
+    vacancies were marked closed and then reopened. Jobs vanished from the
+    dashboard for hours and the closed count became meaningless.
+    """
+
+    def _open_job(self, session, job_id, company_id, source):
+        from datetime import UTC, datetime
+
+        from app.models import Job
+
+        session.add(Job(
+            id=job_id, company_name=company_id, company_id=company_id,
+            title="Machine Learning Engineer", title_normalized="ml engineer",
+            url=f"https://example.com/{job_id}", source=source,
+            location_raw="Munich", city="Munich", country="DE",
+            remote_policy="onsite", employment_type="full_time",
+            description="PyTorch.", summary="PyTorch.",
+            first_seen_at=datetime.now(UTC), last_seen_at=datetime.now(UTC),
+            is_open=True, is_new=False, seniority="junior",
+            language_requirement="english_only", salary_basis="unknown",
+            score=70, score_technical=70, score_experience=70, score_language=70,
+            score_location=70, score_education=70, score_freshness=70,
+            score_domain=70, search_blob=job_id, status="new",
+        ))
+        session.commit()
+
+    def test_an_employer_that_was_not_asked_keeps_its_jobs(self, db):
+        from app.models import Job
+        from app.services.discovery import _persist
+
+        with db() as session:
+            self._open_job(session, "asked|ml|munich", "asked-co", "greenhouse")
+            self._open_job(session, "skipped|ml|munich", "skipped-co", "greenhouse")
+
+            # A run that asked only one of the two employers, and saw nothing.
+            _persist(session, [], Profile({}), {"asked-co"}, set())
+
+            assert session.get(Job, "skipped|ml|munich").is_open is True, (
+                "an employer this run never asked must not have its jobs closed"
+            )
+            assert session.get(Job, "asked|ml|munich").is_open is False, (
+                "an employer that was asked and returned nothing has genuinely closed"
+            )
+
+    def test_a_board_that_did_not_run_keeps_its_jobs(self, db):
+        from app.models import Job
+        from app.services.discovery import _persist
+
+        with db() as session:
+            self._open_job(session, "board|ml|munich", "startup-co", "arbeitnow")
+            _persist(session, [], Profile({}), set(), {"jobsch"})
+            assert session.get(Job, "board|ml|munich").is_open is True
+
+    def test_a_board_that_did_run_closes_what_it_no_longer_lists(self, db):
+        from app.models import Job
+        from app.services.discovery import _persist
+
+        with db() as session:
+            self._open_job(session, "board|ml|munich", "startup-co", "arbeitnow")
+            _persist(session, [], Profile({}), set(), {"arbeitnow"})
+            assert session.get(Job, "board|ml|munich").is_open is False
+
+    def test_a_run_that_asked_nothing_closes_nothing(self, db):
+        from app.models import Job
+        from app.services.discovery import _persist
+
+        with db() as session:
+            self._open_job(session, "any|ml|munich", "any-co", "greenhouse")
+            _persist(session, [], Profile({}), set(), set())
+            assert session.get(Job, "any|ml|munich").is_open is True
+
+
 class TestMatchKey:
     @pytest.mark.parametrize("a,b", [
         ("Celonis SE", "Celonis"),
