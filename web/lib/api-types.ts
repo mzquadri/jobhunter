@@ -706,6 +706,22 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** IndustryProgressOut */
+        IndustryProgressOut: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+            /**
+             * Postings
+             * @default 0
+             */
+            postings: number;
+        };
         /**
          * JobDetail
          * @description Everything about one posting, including its provenance and history.
@@ -1392,6 +1408,11 @@ export interface components {
              * @default
              */
             last_status: string;
+            /**
+             * By Industry
+             * @default []
+             */
+            by_industry: components["schemas"]["IndustryProgressOut"][];
         };
         /** SettingsOut */
         SettingsOut: {
@@ -1558,7 +1579,7 @@ export interface operations {
                 only_clean?: boolean;
                 include_hidden?: boolean;
                 include_closed?: boolean;
-                sort?: "newest" | "score" | "company" | "discovered" | "salary";
+                sort?: "recommended" | "newest" | "score" | "company" | "discovered" | "salary";
                 limit?: number;
                 offset?: number;
             };

@@ -57,6 +57,21 @@ const PAGE_SIZE = 150;
  */
 type QuickView = { id: string; label: string; key: keyof JobQuery; value: unknown };
 
+/**
+ * The one view that is several answers at once.
+ *
+ * Everything else in the bar owns a single query key, which is what stops two
+ * chips fighting. "For You" is deliberately the exception: it is the whole
+ * default stance in one click — worth applying to, recently posted, and in a
+ * language you actually have — so it sets a bundle and is only lit when every
+ * part of that bundle is in effect.
+ */
+const FOR_YOU: Partial<JobQuery> = {
+  min_score: WORTH_APPLYING,
+  max_age_days: 14,
+  sort: "recommended",
+};
+
 const QUICK_GROUPS: { group: string; views: QuickView[] }[] = [
   {
     group: "match",
@@ -132,7 +147,10 @@ export function JobExplorer() {
   const untouched = Array.from(params.keys()).every((k) => k === "open");
 
   const [query, setQuery] = useState<JobQuery>(() => ({
-    sort: (params.get("sort") as JobQuery["sort"]) ?? "newest",
+    // Recommended, not newest: the opening list should be ordered by what to
+    // read first, which is match plus recency plus employer priority plus
+    // whether the language is one you have. Newest is one click away.
+    sort: (params.get("sort") as JobQuery["sort"]) ?? "recommended",
     only_new: params.get("only_new") === "true" || undefined,
     only_starred: params.get("only_starred") === "true" || undefined,
     min_score: params.get("min_score")
@@ -204,6 +222,18 @@ export function JobExplorer() {
     setQuery((q) => ({ ...q, [key]: value || undefined }));
   }
 
+  const forYouActive = (Object.keys(FOR_YOU) as (keyof JobQuery)[]).every(
+    (key) => query[key] === FOR_YOU[key],
+  );
+
+  function toggleForYou() {
+    setQuery((q) =>
+      forYouActive
+        ? { ...q, min_score: undefined, max_age_days: undefined }
+        : { ...q, ...FOR_YOU },
+    );
+  }
+
   function toggleQuick(id: string) {
     const item = QUICK.find((q) => q.id === id);
     if (!item) return;
@@ -233,6 +263,21 @@ export function JobExplorer() {
       {/* Quick views, separated by group so the bar reads as several small
           decisions rather than one long undifferentiated row of chips. */}
       <div className="flex items-center gap-1 overflow-x-auto border-b border-border px-5 py-2 scrollbar-thin">
+        <button
+          onClick={toggleForYou}
+          aria-pressed={forYouActive}
+          title="Worth applying to, posted in the last two weeks, ordered by what to read first"
+          className={cn(
+            "shrink-0 rounded-md border px-2.5 py-1 text-[12px] font-medium transition-colors",
+            forYouActive
+              ? "border-foreground bg-foreground text-background"
+              : "border-ring/50 text-foreground hover:bg-accent",
+          )}
+        >
+          For you
+        </button>
+        <span className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden />
+
         {QUICK_GROUPS.map((group, index) => (
           <div key={group.group} className="flex shrink-0 items-center gap-1">
             {index > 0 && <span className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden />}
@@ -275,6 +320,7 @@ export function JobExplorer() {
           className="h-8 text-[12px]"
           aria-label="Sort"
         >
+          <option value="recommended">Recommended</option>
           <option value="newest">Newest posted</option>
           <option value="discovered">Newest found</option>
           <option value="score">Best match</option>
@@ -343,6 +389,11 @@ export function JobExplorer() {
 
       <JobDrawer
         jobId={openJob}
+        // The panel walks the list you are actually looking at, in the order
+        // it is shown, so j/k move through your filtered results rather than
+        // some global ordering the drawer invented.
+        siblings={jobs.map((j) => j.id)}
+        onNavigate={setOpenJob}
         onClose={() => setOpenJob(null)}
         onChanged={(updated) => {
           setData((prev) =>

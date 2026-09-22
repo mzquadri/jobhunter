@@ -22,7 +22,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -268,13 +268,42 @@ def _match_key(name: str) -> str:
     return "".join(ch for ch in text if ch.isalnum())
 
 
+#: How often each tier's employers are worth asking, in minutes.
+#:
+#: 117 sources every hour is 2,800 requests a day to other people's servers to
+#: re-read a market that moves in days, not minutes. The employers you actually
+#: care about keep the hourly cadence; the rest are asked often enough that a
+#: posting is still fresh when it arrives.
+#:
+#: 0 means every run. A company whose last check is unknown is always due, so a
+#: newly added employer is read immediately rather than waiting out its tier.
+CADENCE_MINUTES: dict[str, int] = {
+    CompanyTier.DREAM: 0,        # every run
+    CompanyTier.HIGH: 0,         # every run
+    CompanyTier.NORMAL: 240,     # four hours
+    CompanyTier.IGNORED: 1440,   # daily, in case the tier is changed back
+}
+
+
+def _is_due(company: Company, now: datetime) -> bool:
+    """Whether this employer's cadence has elapsed since the last check."""
+    interval = CADENCE_MINUTES.get(company.tier, 0)
+    if interval <= 0 or company.last_checked_at is None:
+        return True
+    last = company.last_checked_at
+    if last.tzinfo is None:                     # SQLite hands back naive values
+        last = last.replace(tzinfo=UTC)
+    return (now - last) >= timedelta(minutes=interval)
+
+
 def _build_tasks(
     session: Session, profile: Profile, settings: Settings, run: Run
 ) -> list[Task]:
-    """Every source to ask this run, minus the ones currently backed off."""
+    """Every source to ask this run, minus the ones backed off or not yet due."""
     known = health.load_all(session)
     tasks: list[Task] = []
 
+    now = utcnow()
     for company in session.scalars(
         select(Company).where(Company.enabled.is_(True), Company.adapter.is_not(None))
     ).all():
@@ -286,6 +315,13 @@ def _build_tasks(
             session.add(RunProvider(
                 run_id=run.id, provider=company.adapter, target=company.name,
                 state=ProviderState.SKIPPED, error="backed off after repeated failures",
+            ))
+            continue
+        if not _is_due(company, now):
+            session.add(RunProvider(
+                run_id=run.id, provider=company.adapter, target=company.name,
+                state=ProviderState.SKIPPED,
+                error=f"not due yet ({CADENCE_MINUTES.get(company.tier, 0)}m cadence)",
             ))
             continue
         tasks.append(Task(company.adapter, company.adapter_arg or "",

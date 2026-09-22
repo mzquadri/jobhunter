@@ -17,7 +17,9 @@ from app.enrich.location import REMOTE_LABELS
 from app.enrich.seniority import SENIORITY_LABELS
 from app.models.base import ApplicationStatus, SalaryBasis
 
-SortKey = Literal["newest", "score", "company", "discovered", "salary"]
+SortKey = Literal[
+    "recommended", "newest", "score", "company", "discovered", "salary"
+]
 CountryCode = Literal["de", "ch", "at", "nl", "eu"]
 
 
@@ -428,6 +430,18 @@ class NotificationPage(BaseModel):
     unread: int
 
 
+class IndustryProgressOut(BaseModel):
+    # Validated from the scans service's dataclass, which `vars()` hands over
+    # as objects rather than dicts.
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str
+    label: str
+    done: int
+    total: int
+    postings: int = 0
+
+
 class ScanStateOut(BaseModel):
     """What the scan is doing, for the top bar and the automation screen.
 
@@ -446,6 +460,8 @@ class ScanStateOut(BaseModel):
     next_run_at: datetime | None = None
     last_finished_at: datetime | None = None
     last_status: str = ""
+    #: Real completed/total per industry while a scan runs. Empty when idle.
+    by_industry: list[IndustryProgressOut] = []
 
 
 class SettingsOut(BaseModel):

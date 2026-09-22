@@ -5,12 +5,13 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_session
 from app.deps import profile_dep
-from app.models import ApplicationStatus, Company, Job, StatusEvent, utcnow
+from app.models import ApplicationStatus, Company, CompanyTier, Job, StatusEvent, utcnow
+from app.models.base import LanguageRequirement
 from app.routers.serialize import to_detail, to_summary
 from app.schemas import CountryCode, JobDetail, JobPage, JobPatch, SortKey
 from app.settings import Profile
@@ -108,7 +109,86 @@ def apply_filters(
     return stmt
 
 
+#: How much each ingredient moves the recommended ordering, in score-points.
+#:
+#: Deliberately small next to the match score, which is already a weighted
+#: judgement of fit. These answer the question the score cannot: of two roles
+#: that fit equally well, which should be read first? A fortnight-old 80 and a
+#: three-hour-old 80 are not equally urgent, and the older one is often already
+#: on a shortlist by the time it is opened.
+RECOMMEND_WEIGHTS = {
+    "posted_today": 10,
+    "posted_3_days": 6,
+    "posted_week": 2,
+    "tier_dream": 12,
+    "tier_high": 5,
+    "language_easy": 6,      # English-only, English-preferred, German optional
+    "language_hard": -10,    # B2 and above, on top of the score's own penalty
+}
+
+
+def _recommend_rank():
+    """Ordering for the default view: what to read first this morning.
+
+    Sorting by score alone buries a role posted three hours ago behind one
+    that has been open a fortnight, and sorting by date alone puts a 34 above
+    an 88. Neither is what a person scanning their morning list wants.
+
+    This is a SQL expression rather than a stored column on purpose: freshness
+    changes every hour without anything being rewritten, and the tier can be
+    changed from the Companies screen and must take effect on the next page
+    load rather than the next scan.
+    """
+    today = date.today()
+
+    freshness = case(
+        (Job.posted_at >= today - timedelta(days=1), RECOMMEND_WEIGHTS["posted_today"]),
+        (Job.posted_at >= today - timedelta(days=3), RECOMMEND_WEIGHTS["posted_3_days"]),
+        (Job.posted_at >= today - timedelta(days=7), RECOMMEND_WEIGHTS["posted_week"]),
+        else_=0,
+    )
+    # Company.tier rather than Job.tier: the job's copy is written by the scan
+    # that found it, so promoting an employer in the UI would not show up here
+    # until the next run.
+    priority = case(
+        (Company.tier == CompanyTier.DREAM, RECOMMEND_WEIGHTS["tier_dream"]),
+        (Company.tier == CompanyTier.HIGH, RECOMMEND_WEIGHTS["tier_high"]),
+        else_=0,
+    )
+    language = case(
+        (
+            Job.language_requirement.in_((
+                LanguageRequirement.ENGLISH_ONLY,
+                LanguageRequirement.ENGLISH_PREFERRED,
+                LanguageRequirement.GERMAN_OPTIONAL,
+                LanguageRequirement.GERMAN_BASIC,
+            )),
+            RECOMMEND_WEIGHTS["language_easy"],
+        ),
+        (
+            Job.language_requirement.in_((
+                LanguageRequirement.GERMAN_B2,
+                LanguageRequirement.GERMAN_C1_PLUS,
+                LanguageRequirement.GERMAN_NATIVE,
+            )),
+            RECOMMEND_WEIGHTS["language_hard"],
+        ),
+        else_=0,
+    )
+    # Location is already 20% of the match score and carries its own penalty
+    # for somewhere unreachable, so it is not added a third time here.
+    return Job.score + freshness + priority + language
+
+
 def apply_sort(stmt: Select, sort: SortKey) -> Select:
+    if sort == "recommended":
+        # Outer, not inner: a role from an employer the registry has not caught
+        # up with yet must still be rankable, just without a tier bonus.
+        return stmt.outerjoin(Company, Job.company_id == Company.id).order_by(
+            _recommend_rank().desc(),
+            Job.posted_at.desc().nullslast(),
+            Job.id.asc(),          # stable, so paging cannot repeat a row
+        )
     if sort == "score":
         return stmt.order_by(Job.score.desc(), Job.posted_at.desc().nullslast())
     if sort == "company":

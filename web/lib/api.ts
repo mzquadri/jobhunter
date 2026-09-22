@@ -33,6 +33,7 @@ export type DayCount = Schemas["DayCount"];
 export type NotificationOut = Schemas["NotificationOut"];
 export type NotificationPage = Schemas["NotificationPage"];
 export type ScanStateOut = Schemas["ScanStateOut"];
+export type IndustryProgressOut = Schemas["IndustryProgressOut"];
 export type SettingsOut = Schemas["SettingsOut"];
 export type OnboardingState = Schemas["OnboardingState"];
 export type Analytics = Schemas["Analytics"];

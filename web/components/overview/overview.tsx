@@ -148,6 +148,7 @@ export function Overview() {
         <div className="space-y-5">
           <SignalsFeed signals={signals.data} loading={signals.loading} />
           <DreamRadar companies={dream.data} loading={dream.loading} recommend={recommend} />
+          <IndustryRadar coverage={coverage.data} loading={coverage.loading} />
           <CoveragePanel coverage={coverage.data} loading={coverage.loading} />
           <Watchlist stats={data} />
         </div>
@@ -155,6 +156,9 @@ export function Overview() {
 
       <JobDrawer
         jobId={openJob}
+        // Both lists, in the order the page shows them.
+        siblings={[...(priority.data?.items ?? []), ...worthOnly].map((j) => j.id)}
+        onNavigate={setOpenJob}
         onClose={() => setOpenJob(null)}
         onChanged={() => {
           void priority.refresh(true);
@@ -520,6 +524,66 @@ function DreamRadar({
           ))}
         </ul>
       )}
+    </Card>
+  );
+}
+
+/**
+ * Where the market is active.
+ *
+ * A bar per industry, sized by open roles. Not a chart for decoration: the
+ * question it answers is "where should I be looking this month", and the
+ * answer changes — aerospace goes quiet, AI startups post in bursts. Each row
+ * links to that industry's employers, so it is navigation as well as a
+ * picture.
+ */
+function IndustryRadar({
+  coverage,
+  loading,
+}: {
+  coverage: Coverage | null;
+  loading: boolean;
+}) {
+  if (loading && !coverage) return <Skeleton className="h-52 w-full" />;
+  if (!coverage) return null;
+
+  // Industries with nothing open are dropped rather than drawn as empty bars —
+  // a row of zeros is noise, and the coverage panel already says how many
+  // employers exist.
+  const active = coverage.by_industry.filter((b) => b.open_roles > 0).slice(0, 9);
+  if (!active.length) return null;
+
+  const max = Math.max(...active.map((b) => b.open_roles));
+
+  return (
+    <Card className="p-3.5">
+      <SectionTitle
+        title="Where the market is"
+        hint="Open roles by industry, from employers you track."
+      />
+      <ul className="space-y-1.5">
+        {active.map((bucket) => (
+          <li key={bucket.key}>
+            <Link
+              href={`/companies?industry=${encodeURIComponent(bucket.key)}`}
+              className="group flex items-center gap-2.5"
+            >
+              <span className="w-24 shrink-0 truncate text-[11.5px] capitalize group-hover:text-foreground">
+                {bucket.label}
+              </span>
+              <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                <span
+                  className="block h-full rounded-full bg-[var(--color-chart-1)] transition-[width]"
+                  style={{ width: `${(bucket.open_roles / max) * 100}%` }}
+                />
+              </span>
+              <span className="tabular w-8 shrink-0 text-right text-[11px] text-muted-foreground">
+                {bucket.open_roles}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </Card>
   );
 }

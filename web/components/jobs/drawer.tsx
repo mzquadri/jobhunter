@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Briefcase,
   Building2,
   Check,
+  ChevronDown,
+  ChevronUp,
   ExternalLink,
   FileText,
   Loader2,
@@ -49,10 +51,15 @@ export function JobDrawer({
   jobId,
   onClose,
   onChanged,
+  siblings = [],
+  onNavigate,
 }: {
   jobId: string | null;
   onClose: () => void;
   onChanged?: (job: JobDetail) => void;
+  /** The ids currently on screen, in the order they are shown. */
+  siblings?: string[];
+  onNavigate?: (id: string) => void;
 }) {
   const [job, setJob] = useState<JobDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -91,6 +98,42 @@ export function JobDrawer({
     [job, onChanged],
   );
 
+  const index = jobId ? siblings.indexOf(jobId) : -1;
+  const previousId = index > 0 ? siblings[index - 1] : undefined;
+  const nextId =
+    index >= 0 && index < siblings.length - 1 ? siblings[index + 1] : undefined;
+
+  // Memoised because the keyboard effect depends on them; a fresh closure on
+  // every render would tear down and re-register the listener each time.
+  const goPrevious = useMemo(
+    () => (previousId && onNavigate ? () => onNavigate(previousId) : undefined),
+    [previousId, onNavigate],
+  );
+  const goNext = useMemo(
+    () => (nextId && onNavigate ? () => onNavigate(nextId) : undefined),
+    [nextId, onNavigate],
+  );
+
+  // j/k, because this is a list you move through with your hands on the
+  // keyboard. Arrow keys are left alone so the drawer can still be scrolled.
+  useEffect(() => {
+    if (!jobId) return;
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "j" && goNext) {
+        event.preventDefault();
+        goNext();
+      } else if (event.key === "k" && goPrevious) {
+        event.preventDefault();
+        goPrevious();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [jobId, goNext, goPrevious]);
+
   return (
     <Drawer open={!!jobId} onClose={onClose} label="Job detail">
       {loading && !job ? (
@@ -101,7 +144,18 @@ export function JobDrawer({
         </div>
       ) : !job ? null : (
         <>
-          <Header job={job} onClose={onClose} />
+          <Header
+            job={job}
+            onClose={onClose}
+            nav={
+              <DrawerNav
+                position={index + 1}
+                total={siblings.length}
+                onPrevious={goPrevious}
+                onNext={goNext}
+              />
+            }
+          />
 
           <div className="flex gap-0.5 border-b border-border px-4">
             {([
@@ -184,7 +238,15 @@ function Verdict({ score, blocked }: { score: number; blocked: boolean }) {
   );
 }
 
-function Header({ job, onClose }: { job: JobDetail; onClose: () => void }) {
+function Header({
+  job,
+  onClose,
+  nav,
+}: {
+  job: JobDetail;
+  onClose: () => void;
+  nav?: React.ReactNode;
+}) {
   return (
     <div className="border-b border-border p-4">
       <div className="flex items-start gap-3">
@@ -218,11 +280,14 @@ function Header({ job, onClose }: { job: JobDetail; onClose: () => void }) {
           </div>
         </div>
 
-        <div className="flex shrink-0 items-start gap-2">
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className="flex items-center gap-1">
+            {nav}
+            <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
+              <X />
+            </Button>
+          </span>
           <MatchScore score={job.score} size="lg" showLabel />
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
-            <X />
-          </Button>
         </div>
       </div>
     </div>
@@ -580,12 +645,66 @@ function Footer({
         Ignore
       </Button>
 
+      {/*
+        The primary action says what you are about to do, and only claims what
+        the score supports. Above the line it is an invitation to apply; below
+        it, the honest action is still to read the posting, so the button says
+        that instead of pretending.
+      */}
       <Button asChild size="sm" className="ml-auto">
         <a href={job.url} target="_blank" rel="noopener noreferrer">
-          Open original
+          {isWorthApplying(job.score) ? "Prepare application" : "Open original"}
           <ExternalLink />
         </a>
       </Button>
     </div>
+  );
+}
+
+/**
+ * Move through the list without closing the panel.
+ *
+ * Reading a job is a comparison, not a lookup: the question is almost always
+ * "is this better than the last one". Closing the drawer to answer it loses
+ * your place in a list of seventy, so the drawer carries the list with it.
+ */
+function DrawerNav({
+  position,
+  total,
+  onPrevious,
+  onNext,
+}: {
+  position: number;
+  total: number;
+  onPrevious?: () => void;
+  onNext?: () => void;
+}) {
+  if (total <= 1) return null;
+  return (
+    <span className="flex items-center gap-0.5">
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onPrevious}
+        disabled={!onPrevious}
+        aria-label="Previous job"
+        title="Previous job (k)"
+      >
+        <ChevronUp className="size-4" />
+      </Button>
+      <span className="tabular px-1 text-[11px] text-muted-foreground">
+        {position} / {total}
+      </span>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onNext}
+        disabled={!onNext}
+        aria-label="Next job"
+        title="Next job (j)"
+      >
+        <ChevronDown className="size-4" />
+      </Button>
+    </span>
   );
 }

@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal, advisory_lock
-from app.models import Run, RunStatus, utcnow
+from app.models import Company, Run, RunStatus, utcnow
 from app.services.discovery import run_discovery
 from app.services.profile_service import load_document, load_profile
 from app.settings import get_settings
@@ -31,6 +31,23 @@ log = logging.getLogger(__name__)
 # worker killed mid-sweep leaves the row behind, and without this the UI would
 # refuse to start another scan forever.
 STALE_RUN_AFTER = timedelta(minutes=30)
+
+
+@dataclass
+class IndustryProgress:
+    """How far one industry's employers have got, this run.
+
+    Counted from run_providers rows the scan has already committed, so the
+    numbers are completed work rather than an animated estimate. §67 asks for
+    "Automotive 42 / 48", and 42 has to mean forty-two sources actually
+    finished.
+    """
+
+    key: str
+    label: str
+    done: int
+    total: int
+    postings: int = 0
 
 
 @dataclass
@@ -46,6 +63,7 @@ class ScanState:
     next_run_at: datetime | None = None
     last_finished_at: datetime | None = None
     last_status: str = ""
+    by_industry: list[IndustryProgress] = field(default_factory=list)
 
 
 def current_run(session: Session) -> Run | None:
@@ -113,6 +131,54 @@ def scan_state(session: Session) -> ScanState:
         next_run_at=next_at,
         last_finished_at=last.finished_at if last else None,
         last_status=last.status if last else "",
+        by_industry=_industry_progress(session, running),
+    )
+
+
+def _industry_progress(session: Session, run: Run) -> list[IndustryProgress]:
+    """Per-industry completion for the run in progress.
+
+    `total` is every employer whose source this run intends to ask, taken from
+    the registry. `done` is how many of them have written a run_providers row.
+    Boards are not employers and are grouped separately rather than being
+    silently folded into whichever industry they happened to surface.
+    """
+    industries = dict(session.execute(
+        select(Company.name, Company.industry)
+        .where(Company.enabled.is_(True), Company.adapter.is_not(None))
+    ).all())
+    if not industries:
+        return []
+
+    totals: dict[str, int] = {}
+    for industry in industries.values():
+        key = industry or "other"
+        totals[key] = totals.get(key, 0) + 1
+
+    done: dict[str, int] = {}
+    postings: dict[str, int] = {}
+    for row in run.providers or []:
+        # run_providers.target holds the employer name for company sources and
+        # the provider's own name for boards.
+        industry = industries.get(row.target)
+        if industry is None:
+            continue
+        key = industry or "other"
+        done[key] = done.get(key, 0) + 1
+        postings[key] = postings.get(key, 0) + (row.postings or 0)
+
+    return sorted(
+        (
+            IndustryProgress(
+                key=key,
+                label=key.replace("_", " ").title() if key != "other" else "Other",
+                done=done.get(key, 0),
+                total=total,
+                postings=postings.get(key, 0),
+            )
+            for key, total in totals.items()
+        ),
+        key=lambda i: (-i.total, i.label),
     )
 
 
