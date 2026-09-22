@@ -40,7 +40,14 @@ class SearchPrefs(BaseModel):
 
     max_age_days: Annotated[int, Field(ge=1, le=365)] = 14
     archive_after_days: Annotated[int, Field(ge=1, le=3650)] = 30
+    #: What is stored. Low on purpose: every scan re-scores, so a posting
+    #: below today's bar can rise once a skill or a location tier changes.
     min_score: Annotated[int, Field(ge=0, le=100)] = 25
+    #: What is shown by default. The product's central number -- a role where
+    #: roughly 60% of the description is met is worth applying to.
+    recommend_min_score: Annotated[int, Field(ge=0, le=100)] = 60
+    #: The "read this first" line.
+    high_match_score: Annotated[int, Field(ge=0, le=100)] = 80
     draft_min_score: Annotated[int, Field(ge=0, le=100)] = 60
     keep_undated: bool = True
     target_salary_eur: Annotated[int, Field(ge=0, le=1_000_000)] = 70_000
@@ -112,6 +119,14 @@ class Scoring(BaseModel):
     tier_bonus: dict[str, int] = Field(default_factory=lambda: {"dream": 10, "high": 5})
     seniority_penalty: dict[str, int] = Field(
         default_factory=lambda: {"senior": 30, "lead": 45, "executive": 60}
+    )
+    #: A language requirement beyond your own is not a missing nice-to-have --
+    #: it decides whether applying can succeed. The sub-score alone is too
+    #: small a lever to say so, so these subtract from the total as well.
+    language_penalty: dict[str, int] = Field(
+        default_factory=lambda: {
+            "german_b2": 8, "german_c1_plus": 22, "german_native": 30
+        }
     )
     freshness_curve: list[list[int]] = Field(
         default_factory=lambda: [[1, 100], [3, 92], [7, 75], [14, 45], [30, 15]]

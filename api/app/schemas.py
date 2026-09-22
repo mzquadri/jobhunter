@@ -331,6 +331,20 @@ class Stats(BaseModel):
     max_age_days: int
     headline: str
 
+    # The thresholds the interface must agree with. Sent rather than hard-coded
+    # in the frontend so changing "worth applying" in Settings moves the
+    # dashboard, the explorer's default view and the counts below together.
+    recommend_min_score: int = 60
+    high_match_score: int = 80
+
+    # What the morning view is actually built from: everything at or above the
+    # recommend line, split at the high-match line, plus where they are.
+    worth_applying: int = 0
+    worth_applying_new: int = 0
+    new_in_priority_city: int = 0
+    priority_city: str = ""
+    dream_company_open: int = 0
+
     charts: Charts
     last_run: RunOut | None
     next_run_at: datetime | None

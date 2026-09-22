@@ -156,7 +156,17 @@ class Profile:
 
     @property
     def min_score(self) -> int:
+        """What is persisted. Kept low so re-scoring can rescue a posting."""
         return int(self.search.get("min_score", 25))
+
+    @property
+    def recommend_min_score(self) -> int:
+        """What is shown by default -- the "worth applying" line."""
+        return int(self.search.get("recommend_min_score", 60))
+
+    @property
+    def high_match_score(self) -> int:
+        return int(self.search.get("high_match_score", 80))
 
     @property
     def draft_min_score(self) -> int:
