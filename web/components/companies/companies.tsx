@@ -403,9 +403,22 @@ function CompanyDrawer({
               />
               <div className="min-w-0 flex-1">
                 <h2 className="text-[15px] font-semibold tracking-tight">{company.name}</h2>
-                <p className="mt-0.5 text-[12px] text-muted-foreground">
-                  {company.industry || "industry not recorded"}
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] text-muted-foreground">
+                  <span>{company.industry || "industry not recorded"}</span>
+                  {company.country && <span>· {company.country.toUpperCase()}</span>}
+                  {company.parent_name && <span>· part of {company.parent_name}</span>}
+                  <SourceBadge company={company} />
                 </p>
+                {company.aliases.length > 0 && (
+                  <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+                    Also posts as {company.aliases.join(", ")}
+                  </p>
+                )}
+                {company.discovered_from && (
+                  <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+                    Found through {company.discovered_from}, not configured by hand
+                  </p>
+                )}
               </div>
               {company.careers_url && (
                 <Button variant="outline" size="sm" asChild>
@@ -416,14 +429,23 @@ function CompanyDrawer({
               )}
             </div>
 
-            <div className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
+            {/* Worth applying leads, because it is the only figure here that
+                decides whether to spend an evening on this employer. */}
+            <div className="mt-3 grid grid-cols-2 gap-2 text-[12px] sm:grid-cols-4">
+              <Fact label="Worth applying" value={company.worth_applying} />
+              <Fact label="Best match" value={company.best_score || "—"} />
               <Fact label="Open roles" value={company.open_roles} />
               <Fact label="New in 7 days" value={company.new_roles_7d} />
-              <Fact
-                label="Last checked"
-                value={company.last_checked_at ? relativeTime(company.last_checked_at) : "never"}
-              />
             </div>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              {company.is_automated
+                ? `Read through ${company.adapter}. Last checked ` +
+                  `${company.last_checked_at ? relativeTime(company.last_checked_at) : "never"}` +
+                  (company.verified_at
+                    ? `, last answered ${relativeTime(company.verified_at)}.`
+                    : "; it has not answered yet.")
+                : "No readable feed. Nothing here is fetched automatically."}
+            </p>
           </header>
 
           <div className="flex-1 overflow-y-auto scrollbar-thin">
