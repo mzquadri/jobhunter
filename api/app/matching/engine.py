@@ -75,6 +75,28 @@ _FULLTIME_HINT = re.compile(
     r"\b(full[\s-]?time|vollzeit|permanent|unbefristet|festanstellung)\b", re.I
 )
 
+#: A word long enough to be a place name, accented alphabets included so
+#: "München" and "Hồ Chí Minh" both qualify.
+_PLACE_WORD = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
+
+#: What applicant-tracking systems put in the location field when they have
+#: nothing to say: "3 Locations", "Multiple Locations", a requisition id, an
+#: internal building code. Not places, and not evidence of anything.
+_PLACEHOLDER_LOCATION = re.compile(
+    r"^\s*(?:\(?[A-Z]{2,}[/\-][A-Z0-9/\-]+\)?\s*)?"          # (HRE/RSU) prefixes
+    r"(?:\d+\s+locations?|multiple\s+locations?|various(?:\s+locations?)?|"
+    r"r\d{5,}|req[\s\-]?\d+|remote|anywhere|worldwide|global)\s*$",
+    re.I,
+)
+
+
+def _looks_like_a_place(raw: str) -> bool:
+    """Whether a location string names somewhere, rather than nothing."""
+    text = raw.strip()
+    if not text or _PLACEHOLDER_LOCATION.match(text):
+        return False
+    return bool(_PLACE_WORD.search(text))
+
 
 @dataclass
 class SubScores:
@@ -143,6 +165,10 @@ class MatchEngine:
         }
         self.tier_bonus: dict[str, int] = weights.get("tier_bonus") or {}
         self.seniority_penalty: dict[str, int] = weights.get("seniority_penalty") or {}
+        self.location_penalty: dict[str, int] = weights.get("location_penalty") or {
+            "unmatched": 26,
+            "unmatched_remote": 10,
+        }
         self.language_penalty: dict[str, int] = weights.get("language_penalty") or {
             LanguageRequirement.GERMAN_B2: 8,
             LanguageRequirement.GERMAN_C1_PLUS: 22,
@@ -281,6 +307,41 @@ class MatchEngine:
             score = min(100, score + 8)
         return score
 
+    def _unreachable_location_penalty(self, loc, raw: str, gaps: list[str]) -> int:
+        """Extra cost for a role somewhere you could not actually take it.
+
+        The sub-score cannot carry this. Location is 20% of a weighted average,
+        so a posting with perfect technical, education and domain scores still
+        reached 81 while sitting in Ho Chi Minh City, and a Maryland role
+        reached 78 -- both with a location sub-score of 0. An average cannot
+        express "this one is in a country you cannot work in"; only a penalty
+        can, which is the same conclusion the language requirement reached.
+
+        Applied only when the employer *stated* a place and it matched none of
+        the configured tiers. A blank or unparseable location ("3 Locations",
+        a Workday requisition id) is not evidence of anything and is left
+        alone -- rejecting those would throw away real roles over a formatting
+        quirk.
+        """
+        if loc.tier_points or not raw.strip():
+            return 0
+        # Somewhere was named, and none of it was recognised. Placeholders are
+        # short and structural; a real place name has letters and usually a
+        # comma or a country.
+        if not _looks_like_a_place(raw):
+            return 0
+
+        remote = loc.remote_policy == RemotePolicy.REMOTE
+        penalty = self.location_penalty.get(
+            "unmatched_remote" if remote else "unmatched", 0
+        )
+        if penalty:
+            gaps.append(
+                f"Located in {raw.strip()[:60]}, which is outside the places you work"
+                + (" — though the role is advertised as remote" if remote else "")
+            )
+        return penalty
+
     def _education(self, text, reasons, gaps) -> int:
         mine = _DEGREE_RANK.get(self.p.education_level, 2)
         asked = [name for name, pattern in _DEGREE_PATTERNS.items() if pattern.search(text)]
@@ -389,6 +450,8 @@ class MatchEngine:
         # left a role requiring negotiation-level German sitting in "Good
         # Match". So the hard levels also take an explicit penalty, the same
         # shape as seniority, configurable and visible in the profile.
+        score -= self._unreachable_location_penalty(loc, location or "", gaps)
+
         language_penalty = self.language_penalty.get(language.level, 0)
         if language_penalty:
             score -= language_penalty

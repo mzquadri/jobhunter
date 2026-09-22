@@ -123,6 +123,11 @@ class Scoring(BaseModel):
     #: A language requirement beyond your own is not a missing nice-to-have --
     #: it decides whether applying can succeed. The sub-score alone is too
     #: small a lever to say so, so these subtract from the total as well.
+    #: A role somewhere you cannot work is not a weaker match, it is a
+    #: different thing entirely. 20% of a weighted average cannot say so.
+    location_penalty: dict[str, int] = Field(
+        default_factory=lambda: {"unmatched": 26, "unmatched_remote": 10}
+    )
     language_penalty: dict[str, int] = Field(
         default_factory=lambda: {
             "german_b2": 8, "german_c1_plus": 22, "german_native": 30

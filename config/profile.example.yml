@@ -266,6 +266,15 @@ scoring:
   # weighted sum, so dropping that sub-score from 60 to 8 moved a total by
   # seven points and left roles demanding negotiation-level German sitting in
   # "Good Match". These say it properly.
+  # Subtracted when the employer named a place and it matched none of your
+  # tiers. Without it a perfect technical match in Ho Chi Minh City scored 81
+  # and one in Maryland scored 78: location is 20% of the weighted sum, which
+  # cannot express "you cannot take this job". A blank or unparseable location
+  # is left alone -- that is missing data, not a different continent.
+  location_penalty:
+    unmatched: 26
+    unmatched_remote: 10
+
   language_penalty:
     german_b2: 8
     german_c1_plus: 22
