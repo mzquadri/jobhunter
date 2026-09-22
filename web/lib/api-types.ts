@@ -98,9 +98,13 @@ export interface paths {
          * Change a company's priority
          * @description Promote or demote an employer from the interface.
          *
-         *     Tier feeds the score directly -- a shortlisted employer lifts a match --
-         *     so this has to persist rather than live in the seed file. The next scan
-         *     reads it from here.
+         *     Written to two places on purpose. The row is what every read and the next
+         *     score use; the settings document is what ``sync_companies`` reconciles the
+         *     row against at the start of each scan. Writing only the row looked correct
+         *     for an hour and was then silently reverted by the next scan.
+         *
+         *     Notes stay on the row alone: they are the candidate's, and the seed
+         *     document has no business holding them.
          */
         patch: operations["patch_company_api_companies__company_id__patch"];
         trace?: never;
@@ -205,6 +209,32 @@ export interface paths {
          *     query that created it.
          */
         get: operations["run_search_api_searches__search_id__results_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What discovery actually reaches
+         * @description Honest coverage figures.
+         *
+         *     "Tracked" counts every employer in the registry. "Automated" counts only
+         *     those with an adapter configured -- and `by_status` then splits those by
+         *     whether anything has actually been fetched, because a configured source
+         *     that has never answered is not coverage. Claiming the tracked number as
+         *     monitored is the specific overstatement §71 asks this endpoint to prevent.
+         */
+        get: operations["coverage_api_coverage_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -536,6 +566,45 @@ export interface components {
              * @default false
              */
             is_automated: boolean;
+            /**
+             * Country
+             * @default
+             */
+            country: string;
+            /** Parent Id */
+            parent_id?: string | null;
+            /**
+             * Parent Name
+             * @default
+             */
+            parent_name: string;
+            /**
+             * Aliases
+             * @default []
+             */
+            aliases: string[];
+            /**
+             * Source Status
+             * @default manual
+             */
+            source_status: string;
+            /** Verified At */
+            verified_at?: string | null;
+            /**
+             * Discovered From
+             * @default
+             */
+            discovered_from: string;
+            /**
+             * Worth Applying
+             * @default 0
+             */
+            worth_applying: number;
+            /**
+             * Best Score
+             * @default 0
+             */
+            best_score: number;
         };
         /**
          * CompanyPatch
@@ -548,6 +617,51 @@ export interface components {
             enabled?: boolean | null;
             /** Notes */
             notes?: string | null;
+        };
+        /**
+         * Coverage
+         * @description What discovery actually reaches, stated without rounding up.
+         *
+         *     Every count here is of rows in the companies table, split by whether
+         *     anything has ever successfully fetched from them. "Tracked" is not
+         *     "monitored": the difference is the whole point of the section.
+         */
+        Coverage: {
+            /** Tracked */
+            tracked: number;
+            /** Automated */
+            automated: number;
+            /** Manual */
+            manual: number;
+            /** By Status */
+            by_status: {
+                [key: string]: number;
+            };
+            /** By Industry */
+            by_industry: components["schemas"]["CoverageBucket"][];
+            /** By Country */
+            by_country: components["schemas"]["CoverageBucket"][];
+            /** Providers */
+            providers: components["schemas"]["CoverageBucket"][];
+            /** Discovered By Boards */
+            discovered_by_boards: number;
+            /** Last Scan At */
+            last_scan_at?: string | null;
+        };
+        /** CoverageBucket */
+        CoverageBucket: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Companies */
+            companies: number;
+            /** Automated */
+            automated: number;
+            /** Manual */
+            manual: number;
+            /** Open Roles */
+            open_roles: number;
         };
         /** DayCount */
         DayCount: {
@@ -1317,6 +1431,41 @@ export interface components {
             max_age_days: number;
             /** Headline */
             headline: string;
+            /**
+             * Recommend Min Score
+             * @default 60
+             */
+            recommend_min_score: number;
+            /**
+             * High Match Score
+             * @default 80
+             */
+            high_match_score: number;
+            /**
+             * Worth Applying
+             * @default 0
+             */
+            worth_applying: number;
+            /**
+             * Worth Applying New
+             * @default 0
+             */
+            worth_applying_new: number;
+            /**
+             * New In Priority City
+             * @default 0
+             */
+            new_in_priority_city: number;
+            /**
+             * Priority City
+             * @default
+             */
+            priority_city: string;
+            /**
+             * Dream Company Open
+             * @default 0
+             */
+            dream_company_open: number;
             charts: components["schemas"]["Charts"];
             last_run: components["schemas"]["RunOut"] | null;
             /** Next Run At */
@@ -1531,6 +1680,9 @@ export interface operations {
                 tier?: string | null;
                 /** @description true for employers with a readable endpoint, false for the manual watchlist */
                 automated?: boolean | null;
+                industry?: string | null;
+                country?: string | null;
+                source_status?: string | null;
             };
             header?: never;
             path?: never;
@@ -1832,6 +1984,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    coverage_api_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Coverage"];
                 };
             };
         };

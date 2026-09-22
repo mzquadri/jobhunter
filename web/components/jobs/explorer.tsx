@@ -7,7 +7,9 @@ import { toast } from "sonner";
 import {
   ALL_STATUSES,
   api,
+  HIGH_PRIORITY,
   STATUS_LABELS,
+  WORTH_APPLYING,
   type JobQuery,
   type JobSummary,
 } from "@/lib/api";
@@ -44,19 +46,67 @@ import { cn, postedAge } from "@/lib/utils";
 
 const PAGE_SIZE = 150;
 
-/** One-click views. The filters actually used daily, promoted out of the panel. */
-const QUICK: { id: string; label: string; query: JobQuery }[] = [
-  { id: "new", label: "New", query: { only_new: true } },
-  { id: "today", label: "Today", query: { max_age_days: 1 } },
-  { id: "3d", label: "3 days", query: { max_age_days: 3 } },
-  { id: "munich", label: "Munich", query: { city: "munich" } },
-  { id: "de", label: "Germany", query: { country: "de" } },
-  { id: "ch", label: "Switzerland", query: { country: "ch" } },
-  { id: "english", label: "English only", query: { language: "english_only" } },
-  { id: "80", label: "80+ match", query: { min_score: 80 } },
-  { id: "dream", label: "Shortlist", query: { tier: "dream" } },
-  { id: "saved", label: "Saved", query: { only_starred: true } },
+/**
+ * One-click views, grouped so they compose instead of fighting.
+ *
+ * Each group owns exactly one query key. Picking "Germany" replaces
+ * "Switzerland" because a role is in one country; picking "Munich" alongside
+ * "80%+" keeps both because they are different questions. The old flat list
+ * made every chip toggle independently, so clicking two of them silently
+ * produced a filter nobody asked for.
+ */
+type QuickView = { id: string; label: string; key: keyof JobQuery; value: unknown };
+
+const QUICK_GROUPS: { group: string; views: QuickView[] }[] = [
+  {
+    group: "match",
+    views: [
+      { id: "worth", label: "60%+ Worth applying", key: "min_score", value: WORTH_APPLYING },
+      { id: "high", label: "80%+", key: "min_score", value: HIGH_PRIORITY },
+    ],
+  },
+  {
+    group: "freshness",
+    views: [
+      { id: "new", label: "New", key: "only_new", value: true },
+      { id: "today", label: "Today", key: "max_age_days", value: 1 },
+      { id: "3d", label: "3 days", key: "max_age_days", value: 3 },
+    ],
+  },
+  {
+    group: "place",
+    views: [
+      { id: "munich", label: "Munich", key: "city", value: "munich" },
+      { id: "de", label: "Germany", key: "country", value: "de" },
+      { id: "ch", label: "Switzerland", key: "country", value: "ch" },
+      { id: "at", label: "Austria", key: "country", value: "at" },
+      { id: "nl", label: "Netherlands", key: "country", value: "nl" },
+    ],
+  },
+  {
+    group: "language",
+    views: [{ id: "english", label: "English-first", key: "language", value: "english_only" }],
+  },
+  {
+    group: "field",
+    views: [
+      { id: "ai", label: "AI / LLM", key: "category", value: "Generative AI" },
+      { id: "cv", label: "Computer Vision", key: "category", value: "Computer Vision" },
+      { id: "robotics", label: "Robotics", key: "domain", value: "robotics" },
+      { id: "automotive", label: "Automotive", key: "domain", value: "automotive" },
+      { id: "aerospace", label: "Aerospace", key: "domain", value: "aerospace" },
+    ],
+  },
+  {
+    group: "mine",
+    views: [
+      { id: "dream", label: "Dream companies", key: "tier", value: "dream" },
+      { id: "saved", label: "Saved", key: "only_starred", value: true },
+    ],
+  },
 ];
+
+const QUICK: QuickView[] = QUICK_GROUPS.flatMap((g) => g.views);
 
 const LANGUAGES: [string, string][] = [
   ["english_only", "English only"],
@@ -74,11 +124,22 @@ export function JobExplorer() {
   const params = useSearchParams();
   const router = useRouter();
 
+  // Arriving with no filters at all opens on the roles worth applying to
+  // rather than on everything ever stored. Storage keeps a 43 in case a later
+  // setting change makes it a 67; the opening view is for deciding what to do
+  // today. Any link that names its own filters is honoured untouched, and the
+  // threshold chip is visibly on, so this is a default rather than a trap.
+  const untouched = Array.from(params.keys()).every((k) => k === "open");
+
   const [query, setQuery] = useState<JobQuery>(() => ({
     sort: (params.get("sort") as JobQuery["sort"]) ?? "newest",
     only_new: params.get("only_new") === "true" || undefined,
     only_starred: params.get("only_starred") === "true" || undefined,
-    min_score: params.get("min_score") ? Number(params.get("min_score")) : undefined,
+    min_score: params.get("min_score")
+      ? Number(params.get("min_score"))
+      : untouched
+        ? WORTH_APPLYING
+        : undefined,
     max_age_days: params.get("max_age_days") ? Number(params.get("max_age_days")) : undefined,
     country: (params.get("country") as JobQuery["country"]) ?? undefined,
     tier: params.get("tier") ?? undefined,
@@ -86,6 +147,8 @@ export function JobExplorer() {
     status: (params.get("status") as JobQuery["status"]) ?? undefined,
     company: params.get("company") ?? undefined,
     city: params.get("city") ?? undefined,
+    category: params.get("category") ?? undefined,
+    domain: params.get("domain") ?? undefined,
     limit: PAGE_SIZE,
   }));
 
@@ -144,14 +207,16 @@ export function JobExplorer() {
   function toggleQuick(id: string) {
     const item = QUICK.find((q) => q.id === id);
     if (!item) return;
-    const key = Object.keys(item.query)[0] as keyof JobQuery;
-    const active = query[key] === item.query[key];
-    setQuery((q) => ({ ...q, ...(active ? { [key]: undefined } : item.query) }));
+    setQuery((q) => ({
+      ...q,
+      // Clicking an active chip clears it; clicking a different chip in the
+      // same group replaces it, because one key holds one answer.
+      [item.key]: q[item.key] === item.value ? undefined : item.value,
+    }));
   }
 
-  function isQuickActive(item: (typeof QUICK)[number]) {
-    const key = Object.keys(item.query)[0] as keyof JobQuery;
-    return query[key] === item.query[key];
+  function isQuickActive(item: QuickView) {
+    return query[item.key] === item.value;
   }
 
   const activeFilters = Object.entries(query).filter(
@@ -165,22 +230,28 @@ export function JobExplorer() {
 
   return (
     <>
-      {/* quick views */}
-      <div className="flex gap-1 overflow-x-auto border-b border-border px-5 py-2 scrollbar-thin">
-        {QUICK.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => toggleQuick(item.id)}
-            aria-pressed={isQuickActive(item)}
-            className={cn(
-              "shrink-0 rounded-md border px-2.5 py-1 text-[12px] transition-colors",
-              isQuickActive(item)
-                ? "border-foreground bg-foreground text-background"
-                : "border-border text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {item.label}
-          </button>
+      {/* Quick views, separated by group so the bar reads as several small
+          decisions rather than one long undifferentiated row of chips. */}
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-border px-5 py-2 scrollbar-thin">
+        {QUICK_GROUPS.map((group, index) => (
+          <div key={group.group} className="flex shrink-0 items-center gap-1">
+            {index > 0 && <span className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden />}
+            {group.views.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => toggleQuick(item.id)}
+                aria-pressed={isQuickActive(item)}
+                className={cn(
+                  "shrink-0 rounded-md border px-2.5 py-1 text-[12px] transition-colors",
+                  isQuickActive(item)
+                    ? "border-foreground bg-foreground font-medium text-background"
+                    : "border-border text-muted-foreground hover:border-ring/50 hover:text-foreground",
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         ))}
       </div>
 

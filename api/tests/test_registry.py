@@ -218,6 +218,77 @@ class TestBoardDiscovery:
             assert created == 2
 
 
+class TestSourceStatusReflectsReality:
+    """§34 — an employer is never labelled working on the strength of config."""
+
+    def _run_rows(self, state, postings=3, name="Helsing"):
+        from app.models import RunProvider
+
+        return [RunProvider(run_id=1, provider="greenhouse", target=name,
+                            state=state, postings=postings)]
+
+    def _configured(self, session, name="Helsing"):
+        sync_companies(session, Profile({"companies": [
+            {"name": name, "adapter": "greenhouse", "arg": name.lower()},
+        ]}))
+
+    def test_a_successful_fetch_marks_the_source_live(self, db):
+        from app.models.base import ProviderState
+        from app.services.discovery import _apply_source_status
+
+        with db() as session:
+            self._configured(session)
+            _apply_source_status(session, self._run_rows(ProviderState.HEALTHY))
+            row = session.get(Company, "helsing")
+            assert row.source_status == SourceStatus.LIVE
+            assert row.verified_at is not None
+
+    def test_a_source_that_answered_with_nothing_is_idle_not_broken(self, db):
+        from app.models.base import ProviderState
+        from app.services.discovery import _apply_source_status
+
+        with db() as session:
+            self._configured(session)
+            _apply_source_status(
+                session, self._run_rows(ProviderState.HEALTHY, postings=0)
+            )
+            row = session.get(Company, "helsing")
+            assert row.source_status == SourceStatus.IDLE
+            assert row.verified_at is not None, "it answered; that is worth recording"
+
+    def test_a_failure_marks_the_source_broken(self, db):
+        from app.models.base import ProviderState
+        from app.services.discovery import _apply_source_status
+
+        with db() as session:
+            self._configured(session)
+            _apply_source_status(session, self._run_rows(ProviderState.FAILED))
+            assert session.get(Company, "helsing").source_status == SourceStatus.BROKEN
+
+    def test_being_refused_is_not_the_same_as_being_broken(self, db):
+        from app.models.base import ProviderState
+        from app.services.discovery import _apply_source_status
+
+        with db() as session:
+            self._configured(session)
+            _apply_source_status(session, self._run_rows(ProviderState.RATE_LIMITED))
+            assert (session.get(Company, "helsing").source_status
+                    == SourceStatus.RATE_LIMITED)
+
+    def test_a_manual_employer_is_untouched_by_a_run(self, db):
+        from app.models.base import ProviderState
+        from app.services.discovery import _apply_source_status
+
+        with db() as session:
+            sync_companies(session, Profile({"companies": [
+                {"name": "Ferrari", "careers_url": "https://example.com/careers"},
+            ]}))
+            _apply_source_status(
+                session, self._run_rows(ProviderState.HEALTHY, name="Ferrari")
+            )
+            assert session.get(Company, "ferrari").source_status == SourceStatus.MANUAL
+
+
 class TestMatchKey:
     @pytest.mark.parametrize("a,b", [
         ("Celonis SE", "Celonis"),

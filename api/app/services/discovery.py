@@ -384,6 +384,58 @@ def apply_health(session: Session, rows: list[RunProvider], settings: Settings) 
                 rate_limited=row.state == ProviderState.RATE_LIMITED,
             )
     session.commit()
+    _apply_source_status(session, rows)
+
+
+def _apply_source_status(session: Session, rows: list[RunProvider]) -> None:
+    """Record, per employer, what actually happened to their source.
+
+    Without this every configured employer sits at "idle" forever and the
+    coverage panel reports 117 sources in an indeterminate state after a run
+    that fetched from all of them. The point of the field is to distinguish
+    "configured" from "working", which requires writing down which it was.
+
+    Keyed on (adapter, target) because that is what a run records, and several
+    employers can legitimately share neither — a target belongs to one employer.
+    """
+    outcomes = {(r.provider, r.target): r for r in rows}
+    if not outcomes:
+        return
+
+    now = utcnow()
+    changed = 0
+    for company in session.scalars(
+        select(Company).where(Company.adapter.is_not(None))
+    ).all():
+        row = outcomes.get((company.adapter, company.adapter_arg or "")) \
+            or outcomes.get((company.adapter, company.name))
+        if row is None:
+            continue
+
+        if row.state == ProviderState.HEALTHY:
+            # Answered. "Live" only when it actually carried postings; a board
+            # that replied with an empty list is working and simply has nothing
+            # open, which is a different fact and worth keeping distinct.
+            status = SourceStatus.LIVE if row.postings else SourceStatus.IDLE
+            company.verified_at = now
+            company.last_success_at = now
+        elif row.state == ProviderState.RATE_LIMITED:
+            status = SourceStatus.RATE_LIMITED
+        elif row.state == ProviderState.SKIPPED:
+            continue
+        else:
+            # It had a working endpoint and stopped answering; that is broken,
+            # not manual. Manual means "there is nothing to read", which is a
+            # permanent property of the employer rather than today's failure.
+            status = SourceStatus.BROKEN
+
+        if company.source_status != status:
+            company.source_status = status
+            changed += 1
+
+    if changed:
+        session.commit()
+        log.info("%d employer source states changed", changed)
 
 
 # ---------------------------------------------------------------------------
