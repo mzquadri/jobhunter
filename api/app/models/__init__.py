@@ -22,22 +22,27 @@ from app.models.base import (
     strip_accents,
     utcnow,
 )
-from app.models.company import Company
+from app.models.company import Company, SourceStatus
 from app.models.job import Job, JobSource, StatusEvent
 from app.models.run import ProviderHealth, Run, RunProvider
 from app.models.search import SavedSearch
+from app.models.settings import SETTINGS_ID, AppSettings, Notification
 
 __all__ = [
     "LANGUAGE_ACCESSIBILITY",
     "PENDING_STATUSES",
+    "SETTINGS_ID",
+    "AppSettings",
     "ApplicationStatus",
     "Base",
     "Company",
     "CompanyTier",
+    "SourceStatus",
     "EmploymentType",
     "Job",
     "JobSource",
     "LanguageRequirement",
+    "Notification",
     "ProviderHealth",
     "ProviderState",
     "RemotePolicy",

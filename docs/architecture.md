@@ -18,9 +18,9 @@ flowchart TD
         DRAFT["Drafting<br/>tag-matched cover letter"]
     end
 
-    DB[("PostgreSQL<br/>jobs · job_sources · companies<br/>runs · provider_health · saved_searches")]
-    API["FastAPI<br/>read + the fields you own"]
-    WEB["Next.js dashboard"]
+    DB[("PostgreSQL<br/>jobs · job_sources · companies · app_settings<br/>runs · provider_health · notifications · saved_searches")]
+    API["FastAPI<br/>read · the fields you own · settings · scans"]
+    WEB["CareerOS<br/>Next.js application"]
 
     ATS --> FETCH
     BOARDS --> FETCH
@@ -131,6 +131,23 @@ Everything else is detail; these two are what the design protects.
 is asserted directly by `TestRunsNeverOverwriteHumanFields` — a sweep can
 refresh a score while your notes survive untouched.
 
+**1b. Settings are read per scan, never cached.**
+
+The settings document lives in `app_settings`, one row, validated on write by
+`app/settings_schema.py`. `profile_service` is the only reader, and it is
+deliberately uncached: an earlier version wrapped it in `lru_cache`, which is
+exactly what makes a preference saved in the UI fail to reach the next scan.
+It is one indexed primary-key read against a scan that makes thousands of HTTP
+requests.
+
+`config/profile.yml` is the seed for the first boot of an empty database and
+is never read again afterwards. Two things follow. A change in the Settings
+screen takes effect on the next scan with no restart. And anything the UI
+writes that a scan later reconciles — an employer's tier or enabled flag —
+must be written to the *document*, not only to its table row, or the next scan
+overwrites it from the seed. `patch_company` does both; `TestScanUsesCurrentSettings`
+asserts the tier survives a scan.
+
 **2. Three kinds of fact are kept apart.**
 
 | What the employer said | What we observed | What we inferred |
@@ -207,13 +224,14 @@ is a source silently lost.
 | Secrets in logs | `RedactingFilter` masks anything matching `api_key=`, `token=`, `password=` and similar before a record is emitted. |
 | Runaway clients | Mutating endpoints are rate limited per client. |
 | Container surface | Both images run as non-root with explicit healthchecks. The database port can be removed from compose to keep it inside the network. |
-| Credentials | Never in the repository. `.env` and `config/profile.yml` are gitignored; committed examples carry placeholders. |
+| Credentials | Never in the repository. `.env`, `config/profile.yml` and the database volume are gitignored; committed examples carry placeholders. `scripts/audit.sh` runs in CI and before every push. |
 
 ## Adding a source
 
 1. Add a class to `app/providers/` implementing `fetch()`.
 2. Register it in `app/providers/__init__.py`.
-3. Reference it in `config/profile.yml`.
+3. Reference it in `config/profile.yml` (the seed), or add the employer
+   through the Settings screen once the stack is running.
 
 Nothing else changes. Which adapter an employer needs is visible in its
 careers URL:

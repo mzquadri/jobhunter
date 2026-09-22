@@ -7,9 +7,22 @@ interface are generated from the same calculation that produced the number.
 If the dashboard says "Strong PyTorch match", the technical sub-score rose
 because the word PyTorch is in the posting.
 
-Four gates reject outright. Seniority deliberately is not one of them: §11
-asks for senior roles to stay searchable but sink, so an excessive level is a
-heavy penalty rather than a filter.
+Gates are deliberately few. Seniority is not one of them -- an excessive level
+is a heavy penalty so the role sinks rather than disappearing -- and neither is
+a missing requirement. The product answers "is applying worth my time?", not
+"am I already the perfect candidate?", and a graduate who meets roughly 60% of
+what a posting describes should see it. Recruiters describe an ideal candidate;
+treating that description as a checklist deletes most of the real market.
+
+Two things follow, and they are the reason this module is not just a weighted
+sum of keyword hits:
+
+  * A requirement the profile does not literally hold can still be partly met
+    by an adjacent one (:mod:`app.enrich.equivalence`), and the transfer is
+    always explained in words.
+  * Being in-field is graded rather than binary (:mod:`app.enrich.relevance`),
+    so an unusual title with a convincing description survives at a discount
+    instead of being rejected on a phrase list.
 """
 
 from __future__ import annotations
@@ -17,15 +30,18 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from app.enrich.equivalence import TransferVerdict, family_members_in, find_transfers
 from app.enrich.language import (
     LANGUAGE_LABELS,
     classify_from_structured,
     classify_language,
 )
 from app.enrich.location import LocationResolver
+from app.enrich.relevance import Relevance, RelevanceVerdict, classify_relevance
 from app.enrich.salary import SalaryVerdict, extract_salary
 from app.enrich.seniority import classify_seniority
 from app.enrich.skills import SkillExtractor
+from app.enrich.terms import alternation
 from app.models.base import (
     LANGUAGE_ACCESSIBILITY,
     EmploymentType,
@@ -58,6 +74,28 @@ _DEGREE_RANK = {"bsc": 1, "msc": 2, "phd": 3}
 _FULLTIME_HINT = re.compile(
     r"\b(full[\s-]?time|vollzeit|permanent|unbefristet|festanstellung)\b", re.I
 )
+
+#: A word long enough to be a place name, accented alphabets included so
+#: "München" and "Hồ Chí Minh" both qualify.
+_PLACE_WORD = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
+
+#: What applicant-tracking systems put in the location field when they have
+#: nothing to say: "3 Locations", "Multiple Locations", a requisition id, an
+#: internal building code. Not places, and not evidence of anything.
+_PLACEHOLDER_LOCATION = re.compile(
+    r"^\s*(?:\(?[A-Z]{2,}[/\-][A-Z0-9/\-]+\)?\s*)?"          # (HRE/RSU) prefixes
+    r"(?:\d+\s+locations?|multiple\s+locations?|various(?:\s+locations?)?|"
+    r"r\d{5,}|req[\s\-]?\d+|remote|anywhere|worldwide|global)\s*$",
+    re.I,
+)
+
+
+def _looks_like_a_place(raw: str) -> bool:
+    """Whether a location string names somewhere, rather than nothing."""
+    text = raw.strip()
+    if not text or _PLACEHOLDER_LOCATION.match(text):
+        return False
+    return bool(_PLACE_WORD.search(text))
 
 
 @dataclass
@@ -127,26 +165,48 @@ class MatchEngine:
         }
         self.tier_bonus: dict[str, int] = weights.get("tier_bonus") or {}
         self.seniority_penalty: dict[str, int] = weights.get("seniority_penalty") or {}
+        self.location_penalty: dict[str, int] = weights.get("location_penalty") or {
+            "unmatched": 26,
+            "unmatched_remote": 10,
+        }
+        self.language_penalty: dict[str, int] = weights.get("language_penalty") or {
+            LanguageRequirement.GERMAN_B2: 8,
+            LanguageRequirement.GERMAN_C1_PLUS: 22,
+            LanguageRequirement.GERMAN_NATIVE: 30,
+        }
         self.freshness_curve: list[tuple[int, int]] = [
             (int(d), int(s)) for d, s in (weights.get("freshness_curve") or [[14, 50]])
         ]
         self.max_tier_points = max(profile.location_tiers or {0: []}, default=1) or 1
+        # Flattened once: the equivalence layer asks what the profile holds,
+        # not which group it was filed under.
+        self._profile_skills = [
+            term for terms in (profile.skills or {}).values() for term in terms
+        ]
 
         self._not_fulltime = [re.compile(rf"(?<![a-z]){re.escape(t)}", re.I)
                               for t in profile.not_fulltime]
-        self._roles = [
-            re.compile(rf"(?<![a-z]){re.escape(t).replace(chr(92) + ' ', '[ /-]+')}", re.I)
-            for t in profile.role_words
-        ]
-        self._too_senior = [(t, re.compile(rf"(?<![a-z]){re.escape(t)}", re.I))
-                            for t in profile.too_senior]
+        # `roles.include` used to be a hard title gate -- the rule that
+        # rejected "Perception Engineer" outright. It now widens the relevance
+        # classifier instead, so the setting still decides what counts as this
+        # person's field without being able to delete the rest of the market.
+        self._target_titles = alternation(profile.role_words)
 
     # -- gates ------------------------------------------------------------
-    def _gate(self, title: str, location: str, age_days: int | None) -> str:
+    def _gate(
+        self, title: str, location: str, age_days: int | None, relevance: RelevanceVerdict
+    ) -> str:
+        """The few rejections that are safe to make.
+
+        Each one answers "this opportunity is genuinely unavailable or is not
+        this profession", never "this candidate is imperfect". A missing tool,
+        an ambitious number of years and a preferred language are all handled by
+        the score, where they are visible and arguable.
+        """
         if any(p.search(title) for p in self._not_fulltime):
             return "not a full-time position"
-        if not any(p.search(title) for p in self._roles):
-            return "not an AI/ML/data role"
+        if not relevance.keep:
+            return relevance.reason
         if region := self.locations.is_excluded(location, self.p.location_exclude):
             return f"outside the target region ({region})"
         if age_days is None and not self.p.keep_undated:
@@ -156,11 +216,24 @@ class MatchEngine:
         return ""
 
     # -- sub-scores -------------------------------------------------------
-    def _technical(self, skills, reasons: list[str]) -> int:
-        total_groups = max(len(self.p.skills), 1)
-        breadth = len(skills.by_group) / total_groups          # how many areas
-        depth = min(len(skills.matched), 8) / 8                # how deeply
-        score = round(breadth * 50 + depth * 50)
+    def _technical(self, skills, transfers: TransferVerdict, reasons: list[str]) -> int:
+        """How well the posting's technology matches the profile.
+
+        Depth carries most of the weight and breadth is a bonus on top. The
+        earlier version split the two evenly, which quietly punished the best
+        possible outcome: a focused "Machine Learning Engineer — Python,
+        PyTorch, MLOps" posting hit two of seven profile groups and scored in
+        the twenties, while a scattergun posting listing one term from every
+        group scored well. Employers hire for depth.
+
+        Transferred credit counts here too, at its family's factor, because a
+        requirement met by an adjacent skill is partly met.
+        """
+        literal = len(skills.matched)
+        effective = literal + transfers.credit
+        depth = min(effective, 7) / 7                       # saturates at seven
+        breadth = min(len(skills.by_group), 4) / 4          # saturates at four
+        score = round(depth * 72 + breadth * 28)
 
         if skills.by_group:
             strongest = skills.strongest_group
@@ -169,21 +242,43 @@ class MatchEngine:
             reasons.append(f"Matches your {strongest.replace('_', ' ')} experience: {pretty}")
         if len(skills.by_group) >= 3:
             reasons.append(f"Spans {len(skills.by_group)} of your skill areas")
+        for transfer in transfers.transfers[:3]:
+            reasons.append(transfer.sentence())
         return min(score, 100)
 
     def _experience(self, min_years, seniority, reasons, gaps) -> int:
+        """Years asked for, read as an aspiration rather than a gate.
+
+        The ladder is deliberately gentle up to about four years. "3+ years" on
+        a graduate-suitable posting is the single most common line in this
+        market and is routinely written by teams who will happily interview
+        someone with one year and the right background. Past five it steepens,
+        because by then the posting is describing a different job.
+        """
         mine = self.p.years_experience
         if min_years is None:
             if seniority in (Seniority.GRADUATE, Seniority.JUNIOR):
                 reasons.append("Advertised at graduate or junior level")
                 return 95
-            return 70                                   # nothing stated
+            return 75                                   # nothing stated
         if min_years <= mine + 1:
             reasons.append(f"Asks for {min_years}+ years, which you meet")
             return 100
+
         gap = min_years - mine
-        gaps.append(f"Asks for {min_years}+ years of experience")
-        return max(0, round(100 - gap * 18))
+        if gap <= 1.5:                                  # ~3 years for this profile
+            score = 82
+            reasons.append(f"Asks for {min_years}+ years — a realistic stretch")
+        elif gap <= 2.5:                                # ~4 years
+            score = 68
+            gaps.append(f"Asks for {min_years}+ years of experience — a stretch")
+        elif gap <= 4:                                  # ~5 years
+            score = 48
+            gaps.append(f"Asks for {min_years}+ years of experience")
+        else:
+            score = max(0, round(52 - (gap - 4) * 13))
+            gaps.append(f"Asks for {min_years}+ years of experience")
+        return score
 
     def _language(self, verdict, reasons, gaps) -> int:
         score = LANGUAGE_ACCESSIBILITY.get(verdict.level, 60)
@@ -211,6 +306,41 @@ class MatchEngine:
         if loc.remote_policy in (RemotePolicy.REMOTE, RemotePolicy.HYBRID) and score < 100:
             score = min(100, score + 8)
         return score
+
+    def _unreachable_location_penalty(self, loc, raw: str, gaps: list[str]) -> int:
+        """Extra cost for a role somewhere you could not actually take it.
+
+        The sub-score cannot carry this. Location is 20% of a weighted average,
+        so a posting with perfect technical, education and domain scores still
+        reached 81 while sitting in Ho Chi Minh City, and a Maryland role
+        reached 78 -- both with a location sub-score of 0. An average cannot
+        express "this one is in a country you cannot work in"; only a penalty
+        can, which is the same conclusion the language requirement reached.
+
+        Applied only when the employer *stated* a place and it matched none of
+        the configured tiers. A blank or unparseable location ("3 Locations",
+        a Workday requisition id) is not evidence of anything and is left
+        alone -- rejecting those would throw away real roles over a formatting
+        quirk.
+        """
+        if loc.tier_points or not raw.strip():
+            return 0
+        # Somewhere was named, and none of it was recognised. Placeholders are
+        # short and structural; a real place name has letters and usually a
+        # comma or a country.
+        if not _looks_like_a_place(raw):
+            return 0
+
+        remote = loc.remote_policy == RemotePolicy.REMOTE
+        penalty = self.location_penalty.get(
+            "unmatched_remote" if remote else "unmatched", 0
+        )
+        if penalty:
+            gaps.append(
+                f"Located in {raw.strip()[:60]}, which is outside the places you work"
+                + (" — though the role is advertised as remote" if remote else "")
+            )
+        return penalty
 
     def _education(self, text, reasons, gaps) -> int:
         mine = _DEGREE_RANK.get(self.p.education_level, 2)
@@ -261,7 +391,8 @@ class MatchEngine:
         description = description or ""
         text = f"{title}\n{description}"
 
-        if reason := self._gate(title, location, age_days):
+        relevance = classify_relevance(title, description, tags, self._target_titles)
+        if reason := self._gate(title, location, age_days, relevance):
             return MatchResult(keep=False, reject_reason=reason, age_days=age_days)
 
         reasons: list[str] = []
@@ -269,6 +400,14 @@ class MatchEngine:
 
         skills = self.skills.extract(title, description, tags)
         seniority = classify_seniority(title, description)
+
+        # Requirements the posting names and the profile does not claim. The
+        # watchlist is the hand-kept list plus every technology that belongs to
+        # an equivalence family, so a transferable skill is considered even when
+        # nobody remembered to add it to a constant.
+        watch = sorted(set(COMMON_REQUIREMENTS) | family_members_in(text))
+        missing = self.skills.missing_from(skills, text, watch)
+        transfers = find_transfers(missing, self._profile_skills)
 
         language = classify_language(title, description)
         if not language.is_explicit and structured:
@@ -282,7 +421,7 @@ class MatchEngine:
         salary = extract_salary(title, description)
 
         sub = SubScores(
-            technical=self._technical(skills, reasons),
+            technical=self._technical(skills, transfers, reasons),
             experience=self._experience(seniority.min_years, seniority.level, reasons, gaps),
             language=self._language(language, reasons, gaps),
             location=self._location(loc, reasons, gaps),
@@ -304,6 +443,23 @@ class MatchEngine:
             label = seniority.title_signal or seniority.level
             gaps.append(f"Advertised at {label} level")
 
+        # A mandatory language you do not have is different in kind from a
+        # missing tool: it decides whether an application can succeed at all.
+        # The language sub-score alone cannot express that -- at 13% of the
+        # weighting, dropping it from 60 to 8 moved a total by seven points and
+        # left a role requiring negotiation-level German sitting in "Good
+        # Match". So the hard levels also take an explicit penalty, the same
+        # shape as seniority, configurable and visible in the profile.
+        score -= self._unreachable_location_penalty(loc, location or "", gaps)
+
+        language_penalty = self.language_penalty.get(language.level, 0)
+        if language_penalty:
+            score -= language_penalty
+            gaps.append(
+                f"Requires {LANGUAGE_LABELS.get(language.level, language.level)} — "
+                f"beyond your stated German"
+            )
+
         flags = []
         for rule in self.p.flags:
             phrases = [str(x).lower() for x in rule.get("phrases", [])]
@@ -319,8 +475,24 @@ class MatchEngine:
                 reasons.append("Stated salary meets your target")
             score += 3
 
-        missing = self.skills.missing_from(skills, text, COMMON_REQUIREMENTS)
-        gaps.extend(f"Asks for {m}, which is not on your profile" for m in missing[:4])
+        # Only what nothing on the profile covers, literally or by transfer.
+        gaps.extend(
+            f"Asks for {m}, which is not on your profile" for m in transfers.unmet[:4]
+        )
+
+        # An uncertain reading of the field is a small discount, not a
+        # rejection. A few points, not a multiplier: scaling by confidence
+        # would drop a genuine 78 to a 47 and bury exactly the unusually-titled
+        # roles this classifier exists to rescue.
+        if relevance.level is Relevance.POSSIBLE:
+            score -= 8
+            gaps.append(
+                f"Read as in-field from the description rather than the title "
+                f"({relevance.reason})"
+            )
+        elif relevance.level is Relevance.LIKELY:
+            score -= 3
+            reasons.append(f"In your field: {relevance.reason}")
 
         employment = EmploymentType.FULL_TIME if _FULLTIME_HINT.search(text) \
             else EmploymentType.UNKNOWN

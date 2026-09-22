@@ -7,15 +7,20 @@ single table; splitting them would be five files of boilerplate.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import engine, get_session
+from app.deps import profile_dep
 from app.models import Company, Job, ProviderHealth, Run, SavedSearch
+from app.models.base import slugify
 from app.routers.jobs import apply_filters, apply_sort
 from app.routers.serialize import to_summary
 from app.schemas import (
     CompanyOut,
+    CompanyPatch,
+    Coverage,
+    CoverageBucket,
     JobPage,
     ProviderHealthOut,
     RunDetail,
@@ -23,7 +28,8 @@ from app.schemas import (
     SavedSearchIn,
     SavedSearchOut,
 )
-from app.settings import Profile, get_profile
+from app.services import profile_service
+from app.settings import Profile
 
 companies = APIRouter(prefix="/api/companies", tags=["companies"])
 runs = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -31,10 +37,50 @@ searches = APIRouter(prefix="/api/searches", tags=["searches"])
 meta = APIRouter(prefix="/api", tags=["meta"])
 
 
-def _out(row: Company) -> CompanyOut:
+def _out(
+    row: Company,
+    *,
+    parents: dict[str, str] | None = None,
+    worth: dict[str, int] | None = None,
+    best: dict[str, int] | None = None,
+) -> CompanyOut:
     out = CompanyOut.model_validate(row)
     out.is_automated = bool(row.adapter)
+    if row.parent_id and parents:
+        out.parent_name = parents.get(row.parent_id, "")
+    if worth is not None:
+        out.worth_applying = worth.get(row.id, 0)
+    if best is not None:
+        out.best_score = best.get(row.id, 0)
     return out
+
+
+def _company_extras(
+    session: Session, profile: Profile
+) -> tuple[dict[str, str], dict[str, int], dict[str, int]]:
+    """Parent names and per-employer match figures, in three queries.
+
+    Computed here rather than denormalised onto the row because the recommend
+    threshold is a setting: changing it must move these numbers immediately,
+    and a stored column would need a scan to catch up.
+    """
+    parents = {
+        c.id: c.name
+        for c in session.scalars(select(Company).where(Company.parent_id.is_(None))).all()
+    }
+    open_and_visible = (Job.is_open.is_(True), Job.hidden.is_(False),
+                        Job.company_id.is_not(None))
+    worth = dict(session.execute(
+        select(Job.company_id, func.count())
+        .where(*open_and_visible, Job.score >= profile.recommend_min_score)
+        .group_by(Job.company_id)
+    ).all())
+    best = dict(session.execute(
+        select(Job.company_id, func.max(Job.score))
+        .where(*open_and_visible)
+        .group_by(Job.company_id)
+    ).all())
+    return parents, worth, best
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +94,10 @@ def list_companies(
         None, description="true for employers with a readable endpoint, "
                           "false for the manual watchlist",
     ),
+    industry: str | None = None,
+    country: str | None = None,
+    source_status: str | None = None,
+    profile: Profile = Depends(profile_dep),
 ) -> list[CompanyOut]:
     stmt = select(Company).where(Company.enabled.is_(True))
     if tier:
@@ -56,18 +106,167 @@ def list_companies(
         stmt = stmt.where(Company.adapter.is_not(None))
     elif automated is False:
         stmt = stmt.where(Company.adapter.is_(None))
+    if industry:
+        stmt = stmt.where(Company.industry == industry.lower())
+    if country:
+        stmt = stmt.where(Company.country == country.lower())
+    if source_status:
+        stmt = stmt.where(Company.source_status == source_status.lower())
     rows = session.scalars(
         stmt.order_by(Company.open_roles.desc(), Company.name.asc())
     ).all()
-    return [_out(c) for c in rows]
+    parents, worth, best = _company_extras(session, profile)
+    return [_out(c, parents=parents, worth=worth, best=best) for c in rows]
+
+
+@meta.get("/coverage", response_model=Coverage,
+          summary="What discovery actually reaches")
+def coverage(
+    session: Session = Depends(get_session),
+    profile: Profile = Depends(profile_dep),
+) -> Coverage:
+    """Honest coverage figures.
+
+    "Tracked" counts every employer in the registry. "Automated" counts only
+    those with an adapter configured -- and `by_status` then splits those by
+    whether anything has actually been fetched, because a configured source
+    that has never answered is not coverage. Claiming the tracked number as
+    monitored is the specific overstatement §71 asks this endpoint to prevent.
+    """
+    rows = session.scalars(select(Company).where(Company.enabled.is_(True))).all()
+    open_counts = dict(session.execute(
+        select(Job.company_id, func.count())
+        .where(Job.is_open.is_(True), Job.hidden.is_(False), Job.company_id.is_not(None))
+        .group_by(Job.company_id)
+    ).all())
+
+    def bucket(attribute: str, labeller=lambda k: k or "not recorded") -> list[CoverageBucket]:
+        groups: dict[str, list[Company]] = {}
+        for row in rows:
+            groups.setdefault(getattr(row, attribute) or "", []).append(row)
+        out = [
+            CoverageBucket(
+                key=key or "unknown",
+                label=labeller(key),
+                companies=len(members),
+                automated=sum(1 for m in members if m.adapter),
+                manual=sum(1 for m in members if not m.adapter),
+                open_roles=sum(open_counts.get(m.id, 0) for m in members),
+            )
+            for key, members in groups.items()
+        ]
+        return sorted(out, key=lambda b: (-b.open_roles, -b.companies, b.label))
+
+    by_status: dict[str, int] = {}
+    for row in rows:
+        by_status[row.source_status] = by_status.get(row.source_status, 0) + 1
+
+    last_scan = session.scalars(
+        select(Run).where(Run.finished_at.is_not(None))
+        .order_by(Run.started_at.desc()).limit(1)
+    ).first()
+
+    return Coverage(
+        tracked=len(rows),
+        automated=sum(1 for r in rows if r.adapter),
+        manual=sum(1 for r in rows if not r.adapter),
+        by_status=dict(sorted(by_status.items())),
+        by_industry=bucket("industry"),
+        by_country=bucket("country", lambda k: (k or "").upper() or "Not recorded"),
+        providers=bucket("adapter", lambda k: k or "manual"),
+        discovered_by_boards=sum(1 for r in rows if r.discovered_from),
+        last_scan_at=last_scan.finished_at if last_scan else None,
+    )
 
 
 @companies.get("/{company_id}", response_model=CompanyOut)
-def get_company(company_id: str, session: Session = Depends(get_session)) -> CompanyOut:
+def get_company(
+    company_id: str,
+    session: Session = Depends(get_session),
+    profile: Profile = Depends(profile_dep),
+) -> CompanyOut:
     row = session.get(Company, company_id)
     if row is None:
         raise HTTPException(status_code=404, detail="No company with that id")
+    parents, worth, best = _company_extras(session, profile)
+    return _out(row, parents=parents, worth=worth, best=best)
+
+
+@companies.patch("/{company_id}", response_model=CompanyOut,
+                 summary="Change a company's priority")
+def patch_company(
+    company_id: str,
+    payload: CompanyPatch,
+    session: Session = Depends(get_session),
+) -> CompanyOut:
+    """Promote or demote an employer from the interface.
+
+    Written to two places on purpose. The row is what every read and the next
+    score use; the settings document is what ``sync_companies`` reconciles the
+    row against at the start of each scan. Writing only the row looked correct
+    for an hour and was then silently reverted by the next scan.
+
+    Notes stay on the row alone: they are the candidate's, and the seed
+    document has no business holding them.
+    """
+    row = session.get(Company, company_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No company with that id")
+
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(row, key, value)
+    session.commit()
+    session.refresh(row)
+
+    reconciled = {k: v for k, v in data.items() if k in ("tier", "enabled")}
+    if reconciled:
+        _persist_company_config(session, company_id, reconciled)
+
     return _out(row)
+
+
+def _persist_company_config(session: Session, company_id: str, changes: dict) -> None:
+    """Mirror a company change into the stored settings document.
+
+    Silent when the employer is not in the document: an employer discovered
+    from a board has no config entry, and inventing one would add a source the
+    candidate never asked to watch.
+    """
+    # The stored JSON rather than the validated model: this rewrites one entry
+    # in a list and hands it straight back, and round-tripping through the
+    # model would drop nothing but buy nothing either.
+    row = profile_service.seed_if_missing(session)
+    entries = [dict(e) for e in (row.profile.get("companies") or [])]
+    for entry in entries:
+        if slugify(str(entry.get("name") or "")) == company_id:
+            entry.update(changes)
+            profile_service.update_document(session, {"companies": entries})
+            return
+
+
+@companies.get("/{company_id}/jobs", response_model=JobPage,
+               summary="Roles at one company")
+def company_jobs(
+    company_id: str,
+    session: Session = Depends(get_session),
+    include_closed: bool = False,
+    limit: int = Query(100, ge=1, le=500),
+) -> JobPage:
+    company = session.get(Company, company_id)
+    if company is None:
+        raise HTTPException(status_code=404, detail="No company with that id")
+
+    stmt = select(Job).where(Job.company_id == company_id)
+    if not include_closed:
+        stmt = stmt.where(Job.is_open.is_(True))
+    rows = session.scalars(
+        stmt.order_by(Job.score.desc(), Job.posted_at.desc().nullslast()).limit(limit)
+    ).all()
+    return JobPage(
+        items=[to_summary(j, company.tier) for j in rows],
+        total=len(rows), limit=limit, offset=0,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +353,7 @@ def delete_search(search_id: int, session: Session = Depends(get_session)) -> No
 def run_search(
     search_id: int,
     session: Session = Depends(get_session),
-    profile: Profile = Depends(get_profile),
+    profile: Profile = Depends(profile_dep),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> JobPage:

@@ -254,6 +254,27 @@ class TestWritePath:
         body = client.patch(self.JOB, json={"status": "applied"}).json()
         assert body["applied_at"] == date.today().isoformat()
 
+    def test_applying_schedules_the_follow_up(self, client, seeded):
+        """Without this the follow-up reminder could never fire."""
+        after = client.get("/api/settings").json()["profile"]["notifications"][
+            "follow_up_after_days"
+        ]
+        body = client.patch(self.JOB, json={"status": "applied"}).json()
+        expected = date.today() + timedelta(days=after)
+        assert body["follow_up_at"] == expected.isoformat()
+
+    def test_a_follow_up_date_you_chose_is_left_alone(self, client, seeded):
+        chosen = (date.today() + timedelta(days=21)).isoformat()
+        client.patch(self.JOB, json={"follow_up_at": chosen})
+        body = client.patch(self.JOB, json={"status": "applied"}).json()
+        assert body["follow_up_at"] == chosen
+
+    def test_zero_days_means_no_follow_up_date(self, client, seeded):
+        client.patch("/api/settings", json={"notifications": {"follow_up_after_days": 0}})
+        body = client.patch(self.JOB, json={"status": "applied"}).json()
+        assert body["applied_at"] == date.today().isoformat()
+        assert body["follow_up_at"] is None
+
     def test_notes_and_contact_round_trip(self, client, seeded):
         body = client.patch(
             self.JOB,
@@ -305,12 +326,38 @@ class TestStats:
     def test_reports_counts_and_charts(self, client, seeded):
         body = client.get("/api/stats").json()
         assert body["total_open"] == 2
-        assert body["high_match"] == 1
         assert set(body["charts"]) == {
             "by_day", "by_country", "by_category",
             "by_company", "by_language", "by_score_band",
         }
         assert body["charts"]["by_day"]
+
+    def test_the_thresholds_the_interface_must_agree_with_are_sent(self, client, seeded):
+        # The frontend renders "Worth applying" and "High priority" from these
+        # rather than from constants of its own, so changing the setting moves
+        # every screen together.
+        body = client.get("/api/stats").json()
+        assert body["recommend_min_score"] == 60
+        assert body["high_match_score"] == 80
+
+    def test_counts_use_the_configured_thresholds_not_magic_numbers(self, client, seeded):
+        body = client.get("/api/stats").json()
+        recommend, high = body["recommend_min_score"], body["high_match_score"]
+
+        listed = client.get(f"/api/jobs?min_score={recommend}&limit=200").json()
+        assert body["worth_applying"] == listed["total"], (
+            "the dashboard's headline count and the list it links to must agree"
+        )
+        assert body["high_match"] == client.get(
+            f"/api/jobs?min_score={high}&limit=200"
+        ).json()["total"]
+
+    def test_raising_the_threshold_moves_the_counts(self, client, seeded):
+        before = client.get("/api/stats").json()["worth_applying"]
+        client.patch("/api/settings", json={"search": {"recommend_min_score": 99}})
+        after = client.get("/api/stats").json()
+        assert after["recommend_min_score"] == 99
+        assert after["worth_applying"] <= before
 
     def test_watchlist_only_contains_unautomatable_employers(self, client, seeded):
         body = client.get("/api/stats").json()

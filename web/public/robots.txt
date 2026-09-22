@@ -1,0 +1,10 @@
+# CareerOS runs on your own machine and holds your job search: who you have
+# applied to, what you wrote, what you were paid. None of it should ever be
+# indexed, including by anything that reaches it through a tunnel or a proxy.
+User-agent: *
+Disallow: /
+
+# This file also keeps web/public/ in the repository. Git does not track empty
+# directories, so without a file here a fresh clone has no public/ at all and
+# the Dockerfile's `COPY /app/public` fails — a build that only ever worked on
+# a machine where the directory happened to exist.

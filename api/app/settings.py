@@ -36,8 +36,11 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
 
     # ---- discovery ----
-    sweep_interval_minutes: int = 60
-    sweep_on_startup: bool = True
+    # How often to scan, and whether to scan on startup, are application
+    # settings rather than deployment settings: they live in the app_settings
+    # row and are changed in the Automation screen, which takes effect without
+    # a restart. Environment variables for them existed once and were ignored.
+    #
     # Identifies the process in run records, so concurrent workers are
     # distinguishable in the run history.
     worker_name: str = "worker"
@@ -52,7 +55,7 @@ class Settings(BaseSettings):
     # candidates are enriched.
     max_enrich: int = 120
     user_agent: str = (
-        "JobHunter/1.0 (+https://github.com/mzquadri/jobhunter) "
+        "CareerOS/1.0 (+https://github.com/mzquadri/jobhunter) "
         "personal job-search agent"
     )
 
@@ -62,6 +65,8 @@ class Settings(BaseSettings):
     backoff_minutes: int = 180
 
     # ---- paths ----
+    # Seed only. Read once on first boot to create the settings row; after
+    # that the database is authoritative and this file is never consulted.
     profile_path: Path = REPO_ROOT / "config" / "profile.yml"
     letter_path: Path = REPO_ROOT / "config" / "letter.md"
     drafts_dir: Path = REPO_ROOT / "data" / "drafts"
@@ -151,7 +156,17 @@ class Profile:
 
     @property
     def min_score(self) -> int:
+        """What is persisted. Kept low so re-scoring can rescue a posting."""
         return int(self.search.get("min_score", 25))
+
+    @property
+    def recommend_min_score(self) -> int:
+        """What is shown by default -- the "worth applying" line."""
+        return int(self.search.get("recommend_min_score", 60))
+
+    @property
+    def high_match_score(self) -> int:
+        return int(self.search.get("high_match_score", 80))
 
     @property
     def draft_min_score(self) -> int:
@@ -262,21 +277,18 @@ class Profile:
         return value if isinstance(value, list) else []
 
 
-@lru_cache
-def get_profile() -> Profile:
+def load_profile_from_seed() -> Profile:
+    """Read the YAML seed directly.
+
+    Only for tooling that has no database session -- tests, and the Alembic
+    environment. Application code must go through
+    ``app.services.profile_service``, because the database is authoritative
+    once the settings row exists.
+    """
     settings = get_settings()
-    path = Path(settings.profile_path)
-    if not path.exists():
-        example = path.with_name("profile.example.yml")
-        raise FileNotFoundError(
-            f"No profile at {path}. Copy {example.name} to {path.name} and edit it."
-        )
-    with path.open(encoding="utf-8") as fh:
-        return Profile(yaml.safe_load(fh) or {})
-
-
-def reload_profile() -> Profile:
-    """Drop the cached profile so an edited YAML takes effect without a
-    container restart."""
-    get_profile.cache_clear()
-    return get_profile()
+    for path in (Path(settings.profile_path),
+                 Path(settings.profile_path).with_name("profile.example.yml")):
+        if path.exists():
+            with path.open(encoding="utf-8") as fh:
+                return Profile(yaml.safe_load(fh) or {})
+    return Profile({})

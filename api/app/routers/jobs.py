@@ -9,10 +9,11 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_session
+from app.deps import profile_dep
 from app.models import ApplicationStatus, Company, Job, StatusEvent, utcnow
 from app.routers.serialize import to_detail, to_summary
 from app.schemas import CountryCode, JobDetail, JobPage, JobPatch, SortKey
-from app.settings import Profile, get_profile
+from app.settings import Profile
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -123,7 +124,7 @@ def apply_sort(stmt: Select, sort: SortKey) -> Select:
 def list_jobs(
     response: Response,
     session: Session = Depends(get_session),
-    profile: Profile = Depends(get_profile),
+    profile: Profile = Depends(profile_dep),
     q: str | None = Query(None, description="Free text over company, title, city and skills"),
     tier: str | None = Query(None, description="dream, high or normal"),
     country: CountryCode | None = None,
@@ -187,7 +188,10 @@ def get_job(job_id: str, session: Session = Depends(get_session)) -> JobDetail:
 
 @router.patch("/{job_id}", response_model=JobDetail, summary="Update your own fields")
 def patch_job(
-    job_id: str, patch: JobPatch, session: Session = Depends(get_session)
+    job_id: str,
+    patch: JobPatch,
+    session: Session = Depends(get_session),
+    profile: Profile = Depends(profile_dep),
 ) -> JobDetail:
     """Update the fields a human owns.
 
@@ -217,6 +221,12 @@ def patch_job(
         if new_status == ApplicationStatus.APPLIED and not job.applied_at \
                 and "applied_at" not in data:
             data["applied_at"] = date.today()
+            # And a follow-up date, so the reminder this product promises can
+            # actually fire. The delay is a setting, never a guess: at 0 no
+            # date is set, and a date the candidate typed is left alone.
+            after = int((profile.raw.get("notifications") or {}).get("follow_up_after_days", 7))
+            if after > 0 and not job.follow_up_at and "follow_up_at" not in data:
+                data["follow_up_at"] = date.today() + timedelta(days=after)
 
     for key, value in data.items():
         setattr(job, key, value)

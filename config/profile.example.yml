@@ -1,11 +1,16 @@
 # ---------------------------------------------------------------------------
-# JobHunter profile
+# CareerOS settings seed
 #
 # Copy to config/profile.yml and make it yours. That file is gitignored, so
 # your name, contact details and search history never reach the repository.
 #
-# Everything discovery and ranking do is driven from here. Adding an employer
-# is one line; there is no code to change.
+# This file is a SEED. It is read once, on the first boot of an empty
+# database, and never again — from then on the settings live in the database
+# and are edited in the Settings screen, which is what a scan reads. Editing
+# this file afterwards changes nothing until you press "Restore defaults".
+#
+# Everything discovery and ranking do is driven from these values. Adding an
+# employer is one line; there is no code to change.
 # ---------------------------------------------------------------------------
 
 candidate:
@@ -30,7 +35,20 @@ search:
   # A job no longer found by any source is archived rather than deleted, so
   # reposting patterns stay visible.
   archive_after_days: 30
+  # Three thresholds, and they are deliberately different numbers.
+  #
+  # min_score decides what is *stored*. It stays low: re-scoring happens every
+  # scan, and settings change, so a 43 today can be a 67 after you add a skill
+  # or widen a location tier. Throwing it away to keep the interface tidy would
+  # destroy data that cannot be recovered without re-fetching the whole market.
   min_score: 25
+  # recommend_min_score decides what is *shown by default* — the dashboard,
+  # the explorer's opening view, the "Worth Applying" list. 60, because a role
+  # where you meet roughly 60% of what was described is worth an application.
+  # Recruiters describe an ideal candidate, not a minimum.
+  recommend_min_score: 60
+  # high_match_score is the "drop everything and read this" line.
+  high_match_score: 80
   draft_min_score: 60
   keep_undated: true
   # A preference, never a filter: a role with no stated salary is still shown.
@@ -103,7 +121,14 @@ locations:
 # What counts as a job
 # ---------------------------------------------------------------------------
 roles:
-  # A posting needs one of these in its title, or it is not the right field.
+  # Titles you consider your field. A posting whose title matches one of these
+  # is treated as certainly relevant.
+  #
+  # This is no longer a gate. It used to be -- a posting needed one of these in
+  # its title or it was discarded -- which threw away "Perception Engineer",
+  # "Autonomy Engineer" and "Decision Scientist" every single scan. Relevance
+  # now also reads the description (app/enrich/relevance.py), so adding a title
+  # here widens what counts as certain rather than narrowing what survives.
   include:
     ["machine learning", "deep learning", "artificial intelligence",
      "ai engineer", "ai/ml", "ml engineer", "mlops", "ml platform",
@@ -164,24 +189,37 @@ roles:
 # Skills, grouped. Groups are what let the matcher say "strong PyTorch and
 # deep-learning match" instead of "11 keywords hit".
 # ---------------------------------------------------------------------------
+# What you have actually worked with. Claim only these.
+#
+# It is tempting to list every adjacent technology so more postings "match",
+# and it makes the product worse: a TensorFlow role then looks like a literal
+# hit instead of a transferable one, Kubernetes never appears as a gap, and
+# every score drifts upward until none of them mean anything.
+#
+# Neighbouring technologies belong in app/enrich/equivalence.py, which awards
+# partial credit and says out loud where it came from — "asks for TensorFlow;
+# your PyTorch experience transfers". That is the honest version of the same
+# generosity, and you can see it on the job.
 skills:
-  core_ml: [pytorch, tensorflow, scikit-learn, xgboost, keras, jax,
-            deep learning, machine learning, neural network, transformer,
-            "hugging face", transformers]
-  research: ["graph neural", gnn, uncertainty, bayesian, conformal,
-             calibration, "uncertainty quantification", "probabilistic",
-             "physics-informed", surrogate, "digital twin"]
-  genai: [llm, rag, "retrieval-augmented", embedding, "vector database",
-          qdrant, "knowledge graph", neo4j, ollama, "fine-tuning", lora,
-          peft, langchain, "prompt engineering", "semantic search"]
+  core_ml: [pytorch, scikit-learn, sklearn, "deep learning", "machine learning",
+            "neural network", transformer, transformers, attention,
+            "hugging face", cnn, convolutional]
+  research: ["graph neural", "graph neural network", gnn, uncertainty,
+             bayesian, conformal, "conformal prediction", calibration,
+             "uncertainty quantification", probabilistic, "physics-informed",
+             surrogate, "digital twin", "scientific computing", simulation]
+  genai: [llm, rag, "retrieval-augmented", "retrieval augmented generation",
+          embedding, embeddings, "vector database", "vector search", qdrant,
+          "knowledge graph", neo4j, ollama, "fine-tuning", langchain,
+          "prompt engineering", "semantic search"]
   vision: ["computer vision", opencv, "image segmentation", "object detection",
-           "grad-cam", cnn, "convolutional", ocr]
-  backend: [fastapi, python, "rest api", django, flask, sql, postgresql,
-            mongodb, redis, "spring boot", java, typescript]
-  mlops: [docker, kubernetes, "ci/cd", mlflow, "weights & biases", airflow,
-          kafka, terraform, "github actions", prometheus, grafana, minio]
-  data: [pandas, numpy, spark, "data pipeline", etl, dbt, "time series",
-         forecasting, "feature engineering"]
+           "medical imaging", "grad-cam", ocr, "image processing"]
+  backend: [fastapi, python, "rest api", sql, postgresql, redis, typescript,
+            "next.js", api, backend, microservices]
+  mlops: [docker, "ci/cd", mlflow, "weights & biases", kafka,
+          "github actions", minio, mlops, "model deployment"]
+  data: [pandas, numpy, "data pipeline", etl, "time series", "time-series",
+         forecasting, "feature engineering", "data science"]
 
 domains:
   [automotive, vehicle, car, mobility, autonomous, adas, aerospace, aviation,
@@ -221,6 +259,27 @@ scoring:
     lead: 45
     executive: 60
 
+  # Subtracted from the total, on top of the language sub-score.
+  #
+  # A language requirement past your own is not a missing nice-to-have: it
+  # decides whether an application can succeed at all. Language is 13% of the
+  # weighted sum, so dropping that sub-score from 60 to 8 moved a total by
+  # seven points and left roles demanding negotiation-level German sitting in
+  # "Good Match". These say it properly.
+  # Subtracted when the employer named a place and it matched none of your
+  # tiers. Without it a perfect technical match in Ho Chi Minh City scored 81
+  # and one in Maryland scored 78: location is 20% of the weighted sum, which
+  # cannot express "you cannot take this job". A blank or unparseable location
+  # is left alone -- that is missing data, not a different continent.
+  location_penalty:
+    unmatched: 26
+    unmatched_remote: 10
+
+  language_penalty:
+    german_b2: 8
+    german_c1_plus: 22
+    german_native: 30
+
   # Freshness curve: (max age in days, sub-score). The first 48 hours matter
   # more than anything else, so it is steep rather than a polite bonus.
   freshness_curve: [[1, 100], [3, 92], [7, 75], [14, 45], [30, 15]]
@@ -251,107 +310,1356 @@ flags:
 # ---------------------------------------------------------------------------
 # Employers.
 #
-#   adapter: workday | smartrecruiters | successfactors | greenhouse | lever
-#            | ashby | personio | workable
-#   tier:    dream | high | normal | ignored
+# Two kinds, and the difference is the whole point of this file.
 #
-# Leave `adapter` out entirely for an employer with no machine-readable
-# endpoint. It still appears in the dashboard as a one-click link -- saying
-# "this one cannot be automated" beats omitting the employer silently.
+# An entry with `adapter:` is read automatically. Every one of them was probed
+# against its real endpoint before being written here -- see
+# `python -m app.tools.verify_sources`. Most companies publish their jobs
+# through one of a handful of applicant-tracking systems, so the adapter is per
+# platform and adding an employer is one line rather than a new scraper.
 #
-# Which adapter an employer uses is visible in its careers URL:
-#   *.myworkdayjobs.com          -> workday,         arg "tenant|wdN|SiteName"
-#   *.smartrecruiters.com        -> smartrecruiters, arg company slug
-#   jobs.<company>.com           -> successfactors,  arg that hostname
-#   boards.greenhouse.io/<slug>  -> greenhouse,      arg the slug
-#   jobs.lever.co/<slug>         -> lever,           arg the slug
-#   jobs.ashbyhq.com/<slug>      -> ashby,           arg the slug
-#   <slug>.jobs.personio.de      -> personio,        arg the slug
-#   apply.workable.com/<slug>    -> workable,        arg the slug
+# An entry with `careers_url:` and no adapter cannot be read. Its careers site
+# has no open feed, or refuses automated clients, and CareerOS says so and
+# gives you the link. That is worth more than a row claiming to be monitored
+# while fetching nothing.
 #
-# Every entry below was verified against its live endpoint on 21 Sep 2026.
+# Guessing an adapter argument is how the second kind silently becomes a lie:
+# of 279 plausible-looking candidates probed for this file, 102 did not exist.
+# Verify before adding.
+#
+#   automated: 117
+#   manual watchlist: 138
+#
+# `parent:` records group ownership (Volkswagen Group -> Audi, Porsche) so the
+# interface can group them; the vacancy always keeps the legal employer that
+# posted it. `aliases:` are other names the same employer posts under, used to
+# match a board result back to a known company.
 # ---------------------------------------------------------------------------
 companies:
-  # ---- aerospace and aviation ----
-  - {name: Airbus,            adapter: workday,         arg: "ag|wd3|Airbus",                 tier: dream,  industry: aerospace}
-  - {name: MTU Aero Engines,  adapter: successfactors,  arg: jobs.mtu.de,                     tier: dream,  industry: aerospace}
-  - {name: DLR,               adapter: successfactors,  arg: jobs.dlr.de,                     tier: high,   industry: aerospace}
-  - {name: Thales,            adapter: workday,         arg: "thales|wd3|Careers",            tier: high,   industry: aerospace}
-  - {name: Isar Aerospace,    adapter: greenhouse,      arg: isaraerospace,                   tier: dream,  industry: aerospace}
-  - {name: Helsing,           adapter: greenhouse,      arg: helsing,                         tier: high,   industry: defence}
-  - {name: Etihad Airways,    adapter: smartrecruiters, arg: EtihadAirways5,                  tier: dream,  industry: aviation}
+  # ===================== automatically monitored =====================
 
-  # ---- automotive ----
-  - {name: BMW Group,         adapter: successfactors,  arg: jobs.bmwgroup.com,               tier: dream,  industry: automotive}
-  - {name: ZF Group,          adapter: successfactors,  arg: jobs.zf.com,                     tier: high,   industry: automotive}
-  - {name: MAN Truck & Bus,   adapter: successfactors,  arg: jobs.man.eu,                     tier: high,   industry: automotive}
-  - {name: TRATON Group,      adapter: successfactors,  arg: jobs.traton.com,                 tier: high,   industry: automotive}
-  - {name: Scania,            adapter: successfactors,  arg: jobs.scania.com,                 tier: normal, industry: automotive}
-  - {name: Bosch,             adapter: smartrecruiters, arg: BoschGroup,                      tier: high,   industry: automotive}
-  - {name: Continental,       adapter: smartrecruiters, arg: Continental,                     tier: high,   industry: automotive}
-  - {name: Schaeffler,        adapter: successfactors,  arg: jobs.schaeffler.com,             tier: normal, industry: automotive}
-  - {name: Wayve,             adapter: greenhouse,      arg: wayve,                           tier: high,   industry: autonomous}
-  - {name: Nuro,              adapter: greenhouse,      arg: nuro,                            tier: normal, industry: autonomous}
-  - {name: KONUX,             adapter: greenhouse,      arg: konux,                           tier: normal, industry: mobility}
+  # -- automotive ------------------------------------------------
+  - name: AVL
+    tier: high
+    adapter: successfactors
+    arg: jobs.avl.com
+    industry: automotive
+    country: at
+  - name: BMW Group
+    tier: dream
+    adapter: successfactors
+    arg: jobs.bmwgroup.com
+    industry: automotive
+    country: de
+    aliases: [BMW, BMW AG, Bayerische Motoren Werke]
+  - name: Bosch
+    tier: high
+    adapter: smartrecruiters
+    arg: BoschGroup
+    industry: automotive
+    country: de
+    aliases: [Robert Bosch, Bosch Group]
+  - name: Continental
+    tier: high
+    adapter: smartrecruiters
+    arg: Continental
+    industry: automotive
+    country: de
+  - name: "MAN Truck & Bus"
+    tier: high
+    adapter: successfactors
+    arg: jobs.man.eu
+    industry: automotive
+    country: de
+    parent: traton-group
+    aliases: [MAN, MAN SE]
+  - name: Scania
+    tier: high
+    adapter: successfactors
+    arg: jobs.scania.com
+    industry: automotive
+    country: se
+    parent: traton-group
+  - name: Schaeffler
+    tier: high
+    adapter: successfactors
+    arg: jobs.schaeffler.com
+    industry: automotive
+    country: de
+  - name: TRATON Group
+    tier: high
+    adapter: successfactors
+    arg: jobs.traton.com
+    industry: automotive
+    country: de
+    parent: volkswagen-group
+    aliases: [TRATON, TRATON SE]
+  - name: Webasto
+    tier: normal
+    adapter: successfactors
+    arg: jobs.webasto.com
+    industry: automotive
+    country: de
+  - name: Woven by Toyota
+    tier: high
+    adapter: lever
+    arg: woven-planet
+    industry: automotive
+    country: jp
+  - name: ZF Group
+    tier: high
+    adapter: successfactors
+    arg: jobs.zf.com
+    industry: automotive
+    country: de
+    aliases: [ZF, ZF Friedrichshafen]
 
-  # ---- Switzerland ----
-  - {name: ABB,               adapter: workday,         arg: "abb|wd3|External_Career_Page",  tier: high,   industry: industrial}
-  - {name: Roche,             adapter: workday,         arg: "roche|wd3|roche-ext",           tier: high,   industry: healthcare}
-  - {name: Novartis,          adapter: workday,         arg: "novartis|wd3|Novartis_Careers", tier: normal, industry: healthcare}
-  - {name: Swiss Re,          adapter: successfactors,  arg: careers.swissre.com,             tier: high,   industry: insurance}
-  - {name: Logitech,          adapter: workday,         arg: "logitech|wd5|Logitech",         tier: normal, industry: technology}
+  # -- autonomous ------------------------------------------------
+  - name: Fernride
+    tier: high
+    adapter: greenhouse
+    arg: fernride
+    industry: autonomous
+    country: de
+  - { name: Nuro, tier: high, adapter: greenhouse, arg: nuro, industry: autonomous, country: us }
+  - { name: Vay, tier: high, adapter: greenhouse, arg: vay, industry: autonomous, country: de }
+  - { name: Wayve, tier: dream, adapter: greenhouse, arg: wayve, industry: autonomous, country: gb }
 
-  # ---- technology, industrial and research ----
-  - {name: SAP,               adapter: successfactors,  arg: jobs.sap.com,                    tier: high,   industry: technology}
-  - {name: Philips,           adapter: workday,         arg: "philips|wd3|jobs-and-careers",  tier: normal, industry: healthcare}
-  - {name: Accenture,         adapter: workday,         arg: "accenture|wd103|AccentureCareers", tier: normal, industry: consulting}
-  - {name: Celonis,           adapter: greenhouse,      arg: celonis,                         tier: high,   industry: technology}
-  - {name: Parloa,            adapter: ashby,           arg: parloa,                          tier: normal, industry: technology}
-  - {name: DeepL,             adapter: ashby,           arg: deepl,                           tier: high,   industry: technology}
-  - {name: Cohere,            adapter: ashby,           arg: cohere,                          tier: normal, industry: technology}
-  - {name: Synthesia,         adapter: ashby,           arg: synthesia,                       tier: normal, industry: technology}
-  - {name: Anthropic,         adapter: greenhouse,      arg: anthropic,                       tier: high,   industry: technology}
-  - {name: Databricks,        adapter: greenhouse,      arg: databricks,                      tier: high,   industry: technology}
-  - {name: Figma,             adapter: greenhouse,      arg: figma,                           tier: normal, industry: technology}
-  - {name: N26,               adapter: greenhouse,      arg: n26,                             tier: normal, industry: fintech}
-  - {name: HelloFresh,        adapter: greenhouse,      arg: hellofresh,                      tier: normal, industry: technology}
-  - {name: SumUp,             adapter: greenhouse,      arg: sumup,                           tier: normal, industry: fintech}
-  - {name: GetYourGuide,      adapter: greenhouse,      arg: getyourguide,                    tier: normal, industry: technology}
-  - {name: Agile Robots,      adapter: workable,        arg: agile-robots,                    tier: normal, industry: robotics}
-  - {name: ProGlove,          adapter: personio,        arg: proglove,                        tier: normal, industry: industrial}
-  - {name: Wandelbots,        adapter: personio,        arg: wandelbots,                      tier: normal, industry: robotics}
-  - {name: Novo Nordisk,      adapter: successfactors,  arg: careers.novonordisk.com,         tier: normal, industry: healthcare}
-  - {name: TU Delft,          adapter: successfactors,  arg: careers.tudelft.nl,              tier: normal, industry: research}
+  # -- mobility --------------------------------------------------
+  - { name: Flix, tier: normal, adapter: greenhouse, arg: flix, industry: mobility, country: de }
+  - name: FreeNow
+    tier: normal
+    adapter: greenhouse
+    arg: freenow
+    industry: mobility
+    country: de
+  - name: KONUX
+    tier: high
+    adapter: greenhouse
+    arg: konux
+    industry: mobility
+    country: de
+    aliases: [Konux]
+  - { name: Veo, tier: normal, adapter: lever, arg: veo, industry: mobility, country: se }
 
-  # ---- watchlist: no public endpoint, checked by hand ----
-  # These render their listings with JavaScript and publish no open feed.
-  # Probed 21 Sep 2026; re-probe before assuming any of them can be automated.
-  - {name: Ferrari,            tier: dream,  industry: automotive, careers_url: "https://corporate.ferrari.com/en/careers"}
-  - {name: Lamborghini,        tier: dream,  industry: automotive, careers_url: "https://www.lamborghini.com/en-en/company/careers"}
-  - {name: Porsche,            tier: dream,  industry: automotive, careers_url: "https://jobs.porsche.com/"}
-  - {name: Audi,               tier: dream,  industry: automotive, careers_url: "https://www.audi.com/en/company/jobs.html"}
-  - {name: Volkswagen Group,   tier: high,   industry: automotive, careers_url: "https://jobs.volkswagengroup.com/"}
-  - {name: Mercedes-Benz,      tier: dream,  industry: automotive, careers_url: "https://group.mercedes-benz.com/careers/job-search/"}
-  - {name: Emirates Group,     tier: dream,  industry: aviation,   careers_url: "https://www.emiratesgroupcareers.com/search-and-apply/"}
-  - {name: Qatar Airways,      tier: normal, industry: aviation,   careers_url: "https://careers.qatarairways.com/"}
-  - {name: Lufthansa Group,    tier: high,   industry: aviation,   careers_url: "https://www.be-lufthansa.com/en/"}
-  - {name: Rolls-Royce,        tier: normal, industry: aerospace,  careers_url: "https://careers.rolls-royce.com/"}
-  - {name: Deutsche Aircraft,  tier: normal, industry: aerospace,  careers_url: "https://www.deutscheaircraft.com/careers"}
-  - {name: Siemens,            tier: high,   industry: technology, careers_url: "https://jobs.siemens.com/careers"}
-  - {name: Siemens Healthineers, tier: high, industry: healthcare, careers_url: "https://jobs.siemens-healthineers.com/careers"}
-  - {name: ZEISS,              tier: high,   industry: technology, careers_url: "https://www.zeiss.com/corporate/en/careers/job-search.html"}
-  - {name: Infineon,           tier: high,   industry: semiconductor, careers_url: "https://www.infineon.com/cms/en/careers/"}
-  - {name: Rohde & Schwarz,    tier: normal, industry: technology, careers_url: "https://www.rohde-schwarz.com/careers/career_252.html"}
-  - {name: Allianz,            tier: normal, industry: insurance,  careers_url: "https://careers.allianz.com/"}
-  - {name: Munich Re,          tier: normal, industry: insurance,  careers_url: "https://www.munichre.com/en/careers.html"}
-  - {name: NVIDIA,             tier: high,   industry: technology, careers_url: "https://www.nvidia.com/en-us/about-nvidia/careers/"}
-  - {name: Rimac / Bugatti,    tier: dream,  industry: automotive, careers_url: "https://www.rimac-group.com/careers/"}
+  # -- aerospace -------------------------------------------------
+  - name: Airbus
+    tier: dream
+    adapter: workday
+    arg: "ag|wd3|Airbus"
+    industry: aerospace
+    country: eu
+    aliases: [Airbus Group, Airbus Defence and Space, Airbus Helicopters]
+  - name: Auterion
+    tier: high
+    adapter: greenhouse
+    arg: auterion
+    industry: aerospace
+    country: ch
+  - name: DLR
+    tier: high
+    adapter: successfactors
+    arg: jobs.dlr.de
+    industry: aerospace
+    country: de
+    aliases: [Deutsches Zentrum für Luft- und Raumfahrt, German Aerospace Center]
+  - name: Isar Aerospace
+    tier: dream
+    adapter: greenhouse
+    arg: isaraerospace
+    industry: aerospace
+    country: de
+  - name: MTU Aero Engines
+    tier: dream
+    adapter: successfactors
+    arg: jobs.mtu.de
+    industry: aerospace
+    country: de
+    aliases: [MTU]
+  - name: Rocket Factory Augsburg
+    tier: high
+    adapter: greenhouse
+    arg: rfa
+    industry: aerospace
+    country: de
+  - name: Thales
+    tier: high
+    adapter: workday
+    arg: "thales|wd3|Careers"
+    industry: aerospace
+    country: fr
 
-# Sent to each employer's own search, so large ones return the right field
-# rather than an arbitrary first page of whatever they have open.
+  # -- defence ---------------------------------------------------
+  - name: Helsing
+    tier: dream
+    adapter: greenhouse
+    arg: helsing
+    industry: defence
+    country: de
+  - name: HENSOLDT
+    tier: high
+    adapter: successfactors
+    arg: jobs.hensoldt.net
+    industry: defence
+    country: de
+
+  # -- aviation --------------------------------------------------
+  - name: Etihad Airways
+    tier: high
+    adapter: smartrecruiters
+    arg: EtihadAirways5
+    industry: aviation
+    country: ae
+    aliases: [Etihad]
+
+  # -- ai --------------------------------------------------------
+  - { name: Anthropic, tier: dream, adapter: greenhouse, arg: anthropic, industry: ai, country: us }
+  - { name: Cohere, tier: high, adapter: ashby, arg: cohere, industry: ai, country: ca }
+  - name: Databricks
+    tier: high
+    adapter: greenhouse
+    arg: databricks
+    industry: ai
+    country: us
+  - { name: Dataiku, tier: normal, adapter: greenhouse, arg: dataiku, industry: ai, country: fr }
+  - { name: DeepL, tier: dream, adapter: ashby, arg: deepl, industry: ai, country: de }
+  - { name: deepset, tier: high, adapter: workable, arg: deepset, industry: ai, country: de }
+  - { name: ElevenLabs, tier: high, adapter: ashby, arg: elevenlabs, industry: ai, country: gb }
+  - { name: Hex, tier: normal, adapter: ashby, arg: hex, industry: ai, country: us }
+  - { name: LangChain, tier: normal, adapter: ashby, arg: langchain, industry: ai, country: us }
+  - { name: Langfuse, tier: normal, adapter: ashby, arg: langfuse, industry: ai, country: de }
+  - { name: Legora, tier: normal, adapter: ashby, arg: legora, industry: ai, country: se }
+  - { name: Lovable, tier: normal, adapter: ashby, arg: lovable, industry: ai, country: se }
+  - { name: Modal, tier: normal, adapter: ashby, arg: modal, industry: ai, country: us }
+  - { name: Nabla, tier: high, adapter: ashby, arg: nabla, industry: ai, country: fr }
+  - { name: Parloa, tier: high, adapter: ashby, arg: parloa, industry: ai, country: de }
+  - { name: Perplexity, tier: high, adapter: ashby, arg: perplexity, industry: ai, country: us }
+  - { name: Photoroom, tier: normal, adapter: ashby, arg: photoroom, industry: ai, country: fr }
+  - { name: Poolside, tier: high, adapter: ashby, arg: poolside, industry: ai, country: fr }
+  - { name: Quantexa, tier: normal, adapter: ashby, arg: quantexa, industry: ai, country: gb }
+  - { name: Scale AI, tier: high, adapter: greenhouse, arg: scaleai, industry: ai, country: us }
+  - { name: Scandit, tier: high, adapter: greenhouse, arg: scandit, industry: ai, country: ch }
+  - { name: Sierra, tier: normal, adapter: ashby, arg: sierra, industry: ai, country: us }
+  - { name: Synthesia, tier: high, adapter: ashby, arg: synthesia, industry: ai, country: gb }
+  - { name: Weaviate, tier: high, adapter: ashby, arg: weaviate, industry: ai, country: nl }
+
+  # -- technology ------------------------------------------------
+  - name: Alasco
+    tier: normal
+    adapter: personio
+    arg: alasco
+    industry: technology
+    country: de
+  - name: Bending Spoons
+    tier: normal
+    adapter: workable
+    arg: bending-spoons
+    industry: technology
+    country: it
+  - name: Celonis
+    tier: high
+    adapter: greenhouse
+    arg: celonis
+    industry: technology
+    country: de
+  - name: Contentful
+    tier: normal
+    adapter: greenhouse
+    arg: contentful
+    industry: technology
+    country: de
+  - name: Deutsche Telekom
+    tier: normal
+    adapter: smartrecruiters
+    arg: DeutscheTelekom
+    industry: technology
+    country: de
+    aliases: [Telekom, T-Systems]
+  - name: Figma
+    tier: normal
+    adapter: greenhouse
+    arg: figma
+    industry: technology
+    country: us
+  - name: GetYourGuide
+    tier: normal
+    adapter: greenhouse
+    arg: getyourguide
+    industry: technology
+    country: de
+  - name: HelloFresh
+    tier: normal
+    adapter: greenhouse
+    arg: hellofresh
+    industry: technology
+    country: de
+  - name: Logitech
+    tier: normal
+    adapter: workday
+    arg: "logitech|wd5|Logitech"
+    industry: technology
+  - { name: n8n, tier: normal, adapter: ashby, arg: n8n, industry: technology, country: de }
+  - name: Nothing
+    tier: normal
+    adapter: workable
+    arg: nothing
+    industry: technology
+    country: gb
+  - name: NVIDIA
+    tier: dream
+    adapter: workday
+    arg: "nvidia|wd5|NVIDIAExternalCareerSite"
+    industry: technology
+    country: us
+    aliases: [Nvidia Corporation]
+  - name: Prewave
+    tier: normal
+    adapter: personio
+    arg: prewave
+    industry: technology
+    country: at
+  - name: Red Hat
+    tier: normal
+    adapter: workday
+    arg: "redhat|wd5|Jobs"
+    industry: technology
+    country: us
+  - name: Salesforce
+    tier: normal
+    adapter: workday
+    arg: "salesforce|wd12|External_Career_Site"
+    industry: technology
+    country: us
+  - { name: Tacto, tier: normal, adapter: workable, arg: tacto, industry: technology, country: de }
+  - name: Ubisoft
+    tier: normal
+    adapter: smartrecruiters
+    arg: Ubisoft
+    industry: technology
+    country: fr
+  - { name: Wolt, tier: normal, adapter: greenhouse, arg: wolt, industry: technology, country: fi }
+
+  # -- semiconductor ---------------------------------------------
+  - name: Applied Materials
+    tier: normal
+    adapter: workday
+    arg: "amat|wd1|External"
+    industry: semiconductor
+    country: us
+  - name: Intel
+    tier: high
+    adapter: workday
+    arg: "intel|wd1|External"
+    industry: semiconductor
+    country: us
+  - name: NXP
+    tier: high
+    adapter: workday
+    arg: "nxp|wd3|careers"
+    industry: semiconductor
+    country: nl
+
+  # -- robotics --------------------------------------------------
+  - name: Agile Robots
+    tier: high
+    adapter: workable
+    arg: agile-robots
+    industry: robotics
+    country: de
+  - name: Blickfeld
+    tier: high
+    adapter: personio
+    arg: blickfeld
+    industry: robotics
+    country: de
+  - name: KUKA
+    tier: high
+    adapter: successfactors
+    arg: jobs.kuka.com
+    industry: robotics
+    country: de
+  - name: ProGlove
+    tier: normal
+    adapter: personio
+    arg: proglove
+    industry: robotics
+    country: de
+  - name: Wandelbots
+    tier: high
+    adapter: personio
+    arg: wandelbots
+    industry: robotics
+    country: de
+
+  # -- industrial ------------------------------------------------
+  - name: ABB
+    tier: high
+    adapter: workday
+    arg: "abb|wd3|External_Career_Page"
+    industry: industrial
+    country: ch
+  - name: Alstom
+    tier: normal
+    adapter: smartrecruiters
+    arg: Alstom
+    industry: industrial
+    country: fr
+  - name: Hitachi
+    tier: normal
+    adapter: workday
+    arg: "hitachi|wd1|hitachi"
+    industry: industrial
+    country: jp
+  - name: SGS
+    tier: normal
+    adapter: smartrecruiters
+    arg: SGS
+    industry: industrial
+    country: ch
+  - name: Signify
+    tier: normal
+    adapter: smartrecruiters
+    arg: Signify
+    industry: industrial
+    country: nl
+  - name: Wienerberger
+    tier: normal
+    adapter: smartrecruiters
+    arg: Wienerberger
+    industry: industrial
+    country: at
+
+  # -- energy ----------------------------------------------------
+  - name: Kraftblock
+    tier: normal
+    adapter: personio
+    arg: kraftblock
+    industry: energy
+    country: de
+  - name: Marvel Fusion
+    tier: high
+    adapter: greenhouse
+    arg: marvelfusion
+    industry: energy
+    country: de
+  - { name: reev, tier: normal, adapter: personio, arg: reev, industry: energy, country: de }
+  - name: RWE
+    tier: normal
+    adapter: successfactors
+    arg: jobs.rwe.com
+    industry: energy
+    country: de
+  - { name: Tanso, tier: normal, adapter: personio, arg: tanso, industry: energy, country: de }
+
+  # -- healthcare ------------------------------------------------
+  - name: Ada Health
+    tier: normal
+    adapter: greenhouse
+    arg: adahealth
+    industry: healthcare
+    country: de
+  - name: AstraZeneca
+    tier: normal
+    adapter: workday
+    arg: "astrazeneca|wd3|Careers"
+    industry: healthcare
+    country: gb
+  - name: Bayer
+    tier: normal
+    adapter: smartrecruiters
+    arg: Bayer
+    industry: healthcare
+    country: de
+  - name: BioNTech
+    tier: high
+    adapter: successfactors
+    arg: jobs.biontech.com
+    industry: healthcare
+    country: de
+  - name: Boehringer Ingelheim
+    tier: normal
+    adapter: successfactors
+    arg: jobs.boehringer-ingelheim.com
+    industry: healthcare
+    country: de
+  - name: Doctolib
+    tier: normal
+    adapter: greenhouse
+    arg: doctolib
+    industry: healthcare
+    country: fr
+  - name: Novartis
+    tier: high
+    adapter: workday
+    arg: "novartis|wd3|Novartis_Careers"
+    industry: healthcare
+    country: ch
+  - name: Novo Nordisk
+    tier: normal
+    adapter: successfactors
+    arg: careers.novonordisk.com
+    industry: healthcare
+    country: dk
+    aliases: [NovoNordisk]
+  - name: Philips
+    tier: high
+    adapter: workday
+    arg: "philips|wd3|jobs-and-careers"
+    industry: healthcare
+    country: nl
+  - name: Roche
+    tier: high
+    adapter: workday
+    arg: "roche|wd3|roche-ext"
+    industry: healthcare
+    country: ch
+
+  # -- finance ---------------------------------------------------
+  - name: Deutsche Bank
+    tier: normal
+    adapter: workday
+    arg: "db|wd3|DBWebsite"
+    industry: finance
+    country: de
+
+  # -- fintech ---------------------------------------------------
+  - { name: Adyen, tier: normal, adapter: greenhouse, arg: adyen, industry: fintech, country: nl }
+  - name: Avaloq
+    tier: normal
+    adapter: smartrecruiters
+    arg: Avaloq
+    industry: fintech
+    country: ch
+  - name: Bitpanda
+    tier: normal
+    adapter: greenhouse
+    arg: bitpanda
+    industry: fintech
+    country: at
+  - { name: N26, tier: normal, adapter: greenhouse, arg: n26, industry: fintech, country: de }
+  - { name: SumUp, tier: normal, adapter: greenhouse, arg: sumup, industry: fintech, country: de }
+  - name: Trade Republic
+    tier: normal
+    adapter: greenhouse
+    arg: traderepublic
+    industry: fintech
+    country: de
+  - name: Visa
+    tier: normal
+    adapter: smartrecruiters
+    arg: Visa
+    industry: fintech
+    country: us
+
+  # -- insurance -------------------------------------------------
+  - name: Munich Re
+    tier: high
+    adapter: successfactors
+    arg: jobs.munichre.com
+    industry: insurance
+    country: de
+    aliases: [Münchener Rück, Munich Reinsurance]
+  - name: ottonova
+    tier: normal
+    adapter: personio
+    arg: ottonova
+    industry: insurance
+    country: de
+  - name: Swiss Re
+    tier: high
+    adapter: successfactors
+    arg: careers.swissre.com
+    industry: insurance
+    country: ch
+    aliases: [Swiss Reinsurance]
+
+  # -- consulting ------------------------------------------------
+  - name: Accenture
+    tier: normal
+    adapter: workday
+    arg: "accenture|wd103|AccentureCareers"
+    industry: consulting
+    country: ie
+  - name: Publicis Groupe
+    tier: normal
+    adapter: smartrecruiters
+    arg: PublicisGroupe
+    industry: consulting
+    country: fr
+  - name: PwC
+    tier: normal
+    adapter: workday
+    arg: "pwc|wd3|Global_Experienced_Careers"
+    industry: consulting
+    country: gb
+
+  # -- research --------------------------------------------------
+  - name: TU Delft
+    tier: normal
+    adapter: successfactors
+    arg: careers.tudelft.nl
+    industry: research
+    country: nl
+
+  # -- retail ----------------------------------------------------
+  - { name: IKEA, tier: normal, adapter: smartrecruiters, arg: IKEA, industry: retail, country: se }
+
+  # -- consumer --------------------------------------------------
+  - name: Ferrero
+    tier: normal
+    adapter: smartrecruiters
+    arg: Ferrero
+    industry: consumer
+    country: it
+
+  # ================ manual watchlist — no readable feed ================
+
+  # -- automotive ------------------------------------------------
+  - name: Aptiv
+    tier: high
+    careers_url: "https://www.aptiv.com/en/careers"
+    industry: automotive
+    country: ie
+  - name: Aston Martin
+    tier: high
+    careers_url: "https://www.astonmartin.com/"
+    industry: automotive
+    country: gb
+  - name: Audi
+    tier: dream
+    careers_url: "https://www.audi.com/careers"
+    industry: automotive
+    country: de
+    parent: volkswagen-group
+  - name: Bertrandt
+    tier: normal
+    careers_url: "https://www.bertrandt.com/en/career"
+    industry: automotive
+    country: de
+  - name: Brose
+    tier: normal
+    careers_url: "https://www.brose.com/de-en/career/"
+    industry: automotive
+    country: de
+  - name: Bugatti Rimac
+    tier: dream
+    careers_url: "https://www.bugatti-rimac.com/"
+    industry: automotive
+    country: hr
+  - name: EDAG
+    tier: normal
+    careers_url: "https://www.edag.com/en/career"
+    industry: automotive
+    country: de
+  - name: ETAS
+    tier: high
+    careers_url: "https://www.etas.com/en/company/careers.php"
+    industry: automotive
+    country: de
+    parent: bosch
+  - name: Ferrari
+    tier: dream
+    careers_url: "https://www.ferrari.com/en-EN/corporate/careers"
+    industry: automotive
+    country: it
+  - name: FEV
+    tier: normal
+    careers_url: "https://www.fev.com/career"
+    industry: automotive
+    country: de
+  - name: Ford Europe
+    tier: normal
+    careers_url: "https://corporate.ford.com/careers.html"
+    industry: automotive
+    country: de
+  - name: FORVIA
+    tier: normal
+    careers_url: "https://www.forvia.com/en/careers"
+    industry: automotive
+    country: fr
+  - name: HELLA
+    tier: normal
+    careers_url: "https://www.forvia.com/en/careers"
+    industry: automotive
+    country: de
+    parent: forvia
+  - name: Hyundai Motor Europe
+    tier: normal
+    careers_url: "https://www.hyundai.com/eu/careers.html"
+    industry: automotive
+    country: de
+  - name: IAV
+    tier: high
+    careers_url: "https://www.iav.com/en/career/"
+    industry: automotive
+    country: de
+  - name: Jaguar Land Rover
+    tier: high
+    careers_url: "https://www.jaguarlandrovercareers.com/"
+    industry: automotive
+    country: gb
+  - name: Knorr-Bremse
+    tier: high
+    careers_url: "https://www.knorr-bremse.com/careers"
+    industry: automotive
+    country: de
+  - name: Koenigsegg
+    tier: high
+    careers_url: "https://www.koenigsegg.com/careers"
+    industry: automotive
+    country: se
+  - name: Lamborghini
+    tier: dream
+    careers_url: "https://www.lamborghini.com/en-en/careers"
+    industry: automotive
+    country: it
+    parent: volkswagen-group
+  - name: Lotus Cars
+    tier: high
+    careers_url: "https://www.lotuscars.com/en-GB/careers"
+    industry: automotive
+    country: gb
+  - name: Magna
+    tier: normal
+    careers_url: "https://www.magna.com/careers"
+    industry: automotive
+    country: at
+  - name: MAHLE
+    tier: normal
+    careers_url: "https://www.mahle.com/"
+    industry: automotive
+    country: de
+  - name: McLaren
+    tier: dream
+    careers_url: "https://careers.mclaren.com/"
+    industry: automotive
+    country: gb
+  - name: Mercedes-Benz
+    tier: dream
+    careers_url: "https://group.mercedes-benz.com/careers/"
+    industry: automotive
+    country: de
+  - name: Pagani
+    tier: normal
+    careers_url: "https://www.pagani.com/"
+    industry: automotive
+    country: it
+  - name: Polestar
+    tier: high
+    careers_url: "https://www.polestar.com/"
+    industry: automotive
+    country: se
+  - name: Porsche
+    tier: dream
+    careers_url: "https://jobs.porsche.com/"
+    industry: automotive
+    country: de
+    parent: volkswagen-group
+  - name: Renault Group
+    tier: normal
+    careers_url: "https://www.renaultgroup.com/en/careers/"
+    industry: automotive
+    country: fr
+  - name: Stellantis
+    tier: normal
+    careers_url: "https://www.stellantis.com/en/careers"
+    industry: automotive
+    country: nl
+  - name: Toyota Motor Europe
+    tier: normal
+    careers_url: "https://www.toyota-europe.com/careers"
+    industry: automotive
+    country: be
+  - name: Valeo
+    tier: normal
+    careers_url: "https://www.valeo.com/en/careers/"
+    industry: automotive
+    country: fr
+  - name: Vector Informatik
+    tier: high
+    careers_url: "https://www.vector.com/int/en/company/career/"
+    industry: automotive
+    country: de
+  - name: Volkswagen Group
+    tier: high
+    careers_url: "https://www.volkswagen-group.com/"
+    industry: automotive
+    country: de
+  - name: Volvo Cars
+    tier: high
+    careers_url: "https://www.volvocars.com/intl/v/career"
+    industry: automotive
+    country: se
+
+  # -- autonomous ------------------------------------------------
+  - name: Applied Intuition
+    tier: high
+    careers_url: "https://www.appliedintuition.com/careers"
+    industry: autonomous
+    country: us
+  - name: Aurora
+    tier: normal
+    careers_url: "https://aurora.tech/careers"
+    industry: autonomous
+    country: us
+  - name: DeepDrive
+    tier: high
+    careers_url: "https://www.deepdrive.eu/careers"
+    industry: autonomous
+    country: de
+  - name: Mobileye
+    tier: high
+    careers_url: "https://www.mobileye.com/careers/"
+    industry: autonomous
+    country: il
+  - name: TTTech Auto
+    tier: high
+    careers_url: "https://www.tttech-auto.com/careers"
+    industry: autonomous
+    country: at
+
+  # -- mobility --------------------------------------------------
+  - name: FINN
+    tier: normal
+    careers_url: "https://www.finn.com/en-DE/careers"
+    industry: mobility
+    country: de
+
+  # -- aerospace -------------------------------------------------
+  - name: Deutsche Aircraft
+    tier: high
+    careers_url: "https://www.deutscheaircraft.com/careers"
+    industry: aerospace
+    country: de
+  - name: ESA
+    tier: high
+    careers_url: "https://www.esa.int/About_Us/Careers_at_ESA"
+    industry: aerospace
+    country: eu
+  - name: Leonardo
+    tier: normal
+    careers_url: "https://www.leonardo.com/en/careers"
+    industry: aerospace
+    country: it
+  - name: OHB
+    tier: high
+    careers_url: "https://www.ohb.de/en/career"
+    industry: aerospace
+    country: de
+  - name: Quantum Systems
+    tier: dream
+    careers_url: "https://quantum-systems.com/career/"
+    industry: aerospace
+    country: de
+  - name: Rolls-Royce
+    tier: high
+    careers_url: "https://careers.rolls-royce.com/"
+    industry: aerospace
+    country: gb
+  - name: Safran
+    tier: high
+    careers_url: "https://www.safran-group.com/jobs"
+    industry: aerospace
+    country: fr
+  - name: The Exploration Company
+    tier: high
+    careers_url: "https://www.exploration.space/careers"
+    industry: aerospace
+    country: de
+  - name: Volocopter
+    tier: high
+    careers_url: "https://www.volocopter.com/careers"
+    industry: aerospace
+    country: de
+
+  # -- defence ---------------------------------------------------
+  - name: Diehl
+    tier: normal
+    careers_url: "https://www.diehl.com/group/en/career/"
+    industry: defence
+    country: de
+  - name: "Rohde & Schwarz"
+    tier: high
+    careers_url: "https://www.rohde-schwarz.com/en/careers"
+    industry: defence
+    country: de
+
+  # -- aviation --------------------------------------------------
+  - name: Air France-KLM
+    tier: normal
+    careers_url: "https://www.airfranceklm.com/en/careers"
+    industry: aviation
+    country: fr
+  - name: Austrian Airlines
+    tier: normal
+    careers_url: "https://www.austrianairlines.ag/en/careers"
+    industry: aviation
+    country: at
+    parent: lufthansa-group
+  - name: British Airways
+    tier: normal
+    careers_url: "https://careers.ba.com/"
+    industry: aviation
+    country: gb
+    parent: iag
+  - { name: IAG, tier: normal, careers_url: "https://www.iairgroup.com/",
+      industry: aviation, country: gb, aliases: [International Airlines Group] }
+  - name: easyJet
+    tier: normal
+    careers_url: "https://careers.easyjet.com/"
+    industry: aviation
+    country: gb
+  - name: Emirates Group
+    tier: dream
+    careers_url: "https://www.emiratesgroupcareers.com/"
+    industry: aviation
+    country: ae
+  - name: Eurowings
+    tier: normal
+    careers_url: "https://www.eurowings.com/en/company/careers.html"
+    industry: aviation
+    country: de
+    parent: lufthansa-group
+  - name: Frequentis
+    tier: high
+    careers_url: "https://www.frequentis.com/en/careers"
+    industry: aviation
+    country: at
+  - name: Lufthansa Group
+    tier: dream
+    careers_url: "https://www.lufthansagroup.com/en/career.html"
+    industry: aviation
+    country: de
+  - name: Lufthansa Systems
+    tier: high
+    careers_url: "https://www.lhsystems.com/career"
+    industry: aviation
+    country: de
+    parent: lufthansa-group
+  - name: Lufthansa Technik
+    tier: high
+    careers_url: "https://www.lufthansa-technik.com/en/jobs"
+    industry: aviation
+    country: de
+    parent: lufthansa-group
+  - name: Qatar Airways
+    tier: high
+    careers_url: "https://careers.qatarairways.com/"
+    industry: aviation
+    country: qa
+  - name: Ryanair
+    tier: normal
+    careers_url: "https://careers.ryanair.com/"
+    industry: aviation
+    country: ie
+  - name: SWISS
+    tier: high
+    careers_url: "https://www.swiss.com/careers"
+    industry: aviation
+    country: ch
+    parent: lufthansa-group
+  - name: Wizz Air
+    tier: normal
+    careers_url: "https://careers.wizzair.com/"
+    industry: aviation
+    country: hu
+
+  # -- ai --------------------------------------------------------
+  - name: Aleph Alpha
+    tier: dream
+    careers_url: "https://aleph-alpha.com/"
+    industry: ai
+    country: de
+  - name: Black Forest Labs
+    tier: high
+    careers_url: "https://bfl.ai/careers"
+    industry: ai
+    country: de
+  - name: Hugging Face
+    tier: high
+    careers_url: "https://huggingface.co/join-us"
+    industry: ai
+    country: fr
+  - name: Mistral AI
+    tier: dream
+    careers_url: "https://mistral.ai/careers"
+    industry: ai
+    country: fr
+  - name: OpenAI
+    tier: high
+    careers_url: "https://openai.com/careers/"
+    industry: ai
+    country: gb
+  - name: "Weights & Biases"
+    tier: normal
+    careers_url: "https://wandb.ai/site/careers"
+    industry: ai
+    country: us
+
+  # -- technology ------------------------------------------------
+  - name: Amazon
+    tier: normal
+    careers_url: "https://www.amazon.jobs/en/"
+    industry: technology
+    country: de
+  - name: Apple
+    tier: high
+    careers_url: "https://jobs.apple.com/en-us/search"
+    industry: technology
+    country: de
+  - name: Booking.com
+    tier: normal
+    careers_url: "https://careers.booking.com/"
+    industry: technology
+    country: nl
+  - name: Cisco
+    tier: normal
+    careers_url: "https://jobs.cisco.com/"
+    industry: technology
+    country: de
+  - name: Dynatrace
+    tier: high
+    careers_url: "https://careers.dynatrace.com/"
+    industry: technology
+    country: at
+  - name: Ericsson
+    tier: normal
+    careers_url: "https://www.ericsson.com/en/careers"
+    industry: technology
+    country: se
+  - name: Google
+    tier: high
+    careers_url: "https://www.google.com/about/careers/applications/"
+    industry: technology
+    country: ch
+  - name: IBM
+    tier: normal
+    careers_url: "https://www.ibm.com/careers/search"
+    industry: technology
+    country: de
+  - name: Luminovo
+    tier: high
+    careers_url: "https://luminovo.com/careers"
+    industry: technology
+    country: de
+  - name: Meta
+    tier: normal
+    careers_url: "https://www.metacareers.com/jobs"
+    industry: technology
+    country: gb
+  - name: Microsoft
+    tier: high
+    careers_url: "https://careers.microsoft.com/"
+    industry: technology
+    country: de
+  - name: Nokia
+    tier: normal
+    careers_url: "https://www.nokia.com/about-us/careers/"
+    industry: technology
+    country: fi
+  - name: Oracle
+    tier: normal
+    careers_url: "https://careers.oracle.com/"
+    industry: technology
+    country: de
+  - name: Picnic
+    tier: normal
+    careers_url: "https://picnic.app/"
+    industry: technology
+    country: nl
+  - name: SAP
+    tier: high
+    careers_url: "https://jobs.sap.com/"
+    industry: technology
+    country: de
+  - name: TomTom
+    tier: high
+    careers_url: "https://www.tomtom.com/careers/"
+    industry: technology
+    country: nl
+  - name: Tractive
+    tier: normal
+    careers_url: "https://tractive.com/careers"
+    industry: technology
+    country: at
+
+  # -- semiconductor ---------------------------------------------
+  - name: AMD
+    tier: normal
+    careers_url: "https://careers.amd.com/"
+    industry: semiconductor
+    country: de
+  - name: ARM
+    tier: high
+    careers_url: "https://www.arm.com/company/careers"
+    industry: semiconductor
+    country: gb
+  - name: ASML
+    tier: high
+    careers_url: "https://www.asml.com/en/careers"
+    industry: semiconductor
+    country: nl
+  - name: GlobalFoundries
+    tier: normal
+    careers_url: "https://gf.com/careers/"
+    industry: semiconductor
+    country: de
+  - name: Infineon
+    tier: high
+    careers_url: "https://www.infineon.com/cms/en/careers/"
+    industry: semiconductor
+    country: de
+  - name: Qualcomm
+    tier: normal
+    careers_url: "https://careers.qualcomm.com/careers"
+    industry: semiconductor
+    country: de
+
+  # -- robotics --------------------------------------------------
+  - name: ANYbotics
+    tier: high
+    careers_url: "https://www.anybotics.com/careers/"
+    industry: robotics
+    country: ch
+  - name: Franka Robotics
+    tier: high
+    careers_url: "https://franka.de/careers"
+    industry: robotics
+    country: de
+  - name: NEURA Robotics
+    tier: high
+    careers_url: "https://neura-robotics.com/careers"
+    industry: robotics
+    country: de
+  - name: RobCo
+    tier: high
+    careers_url: "https://robco.de/en/careers"
+    industry: robotics
+    country: de
+  - name: Universal Robots
+    tier: normal
+    careers_url: "https://www.universal-robots.com/careers/"
+    industry: robotics
+    country: dk
+
+  # -- industrial ------------------------------------------------
+  - name: Honeywell
+    tier: normal
+    careers_url: "https://careers.honeywell.com/"
+    industry: industrial
+    country: de
+  - name: Schneider Electric
+    tier: normal
+    careers_url: "https://www.se.com/ww/en/about-us/careers/"
+    industry: industrial
+    country: fr
+  - name: Siemens
+    tier: high
+    careers_url: "https://jobs.siemens.com/careers"
+    industry: industrial
+    country: de
+  - name: Siemens Mobility
+    tier: high
+    careers_url: "https://jobs.siemens.com/careers"
+    industry: industrial
+    country: de
+    parent: siemens
+  - name: thyssenkrupp
+    tier: normal
+    careers_url: "https://www.thyssenkrupp.com/en/career"
+    industry: industrial
+    country: de
+  - name: ZEISS
+    tier: high
+    careers_url: "https://www.zeiss.com/careers"
+    industry: industrial
+    country: de
+
+  # -- energy ----------------------------------------------------
+  - name: Climeworks
+    tier: high
+    careers_url: "https://climeworks.com/careers"
+    industry: energy
+    country: ch
+  - { name: cylib, tier: high, careers_url: "https://cylib.de/jobs", industry: energy, country: de }
+  - name: E.ON
+    tier: normal
+    careers_url: "https://www.eon.com/en/careers.html"
+    industry: energy
+    country: de
+  - name: EnBW
+    tier: normal
+    careers_url: "https://www.enbw.com/karriere/"
+    industry: energy
+    country: de
+  - name: Hitachi Energy
+    tier: normal
+    careers_url: "https://www.hitachienergy.com/careers"
+    industry: energy
+    country: ch
+    parent: hitachi
+  - name: Munich Electrification
+    tier: high
+    careers_url: "https://www.munichelectrification.com/career"
+    industry: energy
+    country: de
+  - name: Northvolt
+    tier: normal
+    careers_url: "https://northvolt.com/career/"
+    industry: energy
+    country: se
+  - name: Siemens Energy
+    tier: high
+    careers_url: "https://jobs.siemens-energy.com/jobs"
+    industry: energy
+    country: de
+  - name: TenneT
+    tier: normal
+    careers_url: "https://www.tennet.eu/careers"
+    industry: energy
+    country: nl
+  - name: The Mobility House
+    tier: high
+    careers_url: "https://www.mobilityhouse.com/"
+    industry: energy
+    country: de
+  - name: Vattenfall
+    tier: normal
+    careers_url: "https://careers.vattenfall.com/"
+    industry: energy
+    country: se
+
+  # -- healthcare ------------------------------------------------
+  - name: CureVac
+    tier: normal
+    careers_url: "https://www.curevac.com/en/careers/"
+    industry: healthcare
+    country: de
+  - name: Merck
+    tier: normal
+    careers_url: "https://www.merckgroup.com/en/careers.html"
+    industry: healthcare
+    country: de
+  - name: Orbem
+    tier: high
+    careers_url: "https://orbem.ai/careers"
+    industry: healthcare
+    country: de
+  - name: Siemens Healthineers
+    tier: high
+    careers_url: "https://www.siemens-healthineers.com/careers"
+    industry: healthcare
+    country: de
+    parent: siemens
+  - name: Sonova
+    tier: normal
+    careers_url: "https://www.sonova.com/en/careers"
+    industry: healthcare
+    country: ch
+
+  # -- finance ---------------------------------------------------
+  - name: Commerzbank
+    tier: normal
+    careers_url: "https://www.commerzbank.de/careers"
+    industry: finance
+    country: de
+  - name: ING
+    tier: normal
+    careers_url: "https://www.ing.jobs/global"
+    industry: finance
+    country: nl
+  - name: Julius Baer
+    tier: normal
+    careers_url: "https://www.juliusbaer.com/en/careers/"
+    industry: finance
+    country: ch
+  - name: Rabobank
+    tier: normal
+    careers_url: "https://rabobank.jobs/en/"
+    industry: finance
+    country: nl
+  - name: UBS
+    tier: normal
+    careers_url: "https://www.ubs.com/global/en/careers.html"
+    industry: finance
+    country: ch
+
+  # -- fintech ---------------------------------------------------
+  - name: Mollie
+    tier: normal
+    careers_url: "https://jobs.mollie.com/"
+    industry: fintech
+    country: nl
+  - name: Revolut
+    tier: normal
+    careers_url: "https://www.revolut.com/careers/"
+    industry: fintech
+    country: gb
+
+  # -- insurance -------------------------------------------------
+  - name: Allianz
+    tier: high
+    careers_url: "https://careers.allianz.com/"
+    industry: insurance
+    country: de
+  - name: ERGO
+    tier: normal
+    careers_url: "https://www.ergo.com/careers"
+    industry: insurance
+    country: de
+    parent: munich-re
+  - name: Zurich Insurance
+    tier: normal
+    careers_url: "https://www.zurich.com/careers"
+    industry: insurance
+    country: ch
+
+  # -- consulting ------------------------------------------------
+  - name: BCG X
+    tier: normal
+    careers_url: "https://careers.bcg.com/x"
+    industry: consulting
+    country: de
+  - name: Capgemini Engineering
+    tier: normal
+    careers_url: "https://www.capgemini.com/careers/"
+    industry: consulting
+    country: de
+  - name: Deloitte
+    tier: normal
+    careers_url: "https://www2.deloitte.com/de/de/careers.html"
+    industry: consulting
+    country: de
+  - name: EY
+    tier: normal
+    careers_url: "https://www.ey.com/en_gl/careers"
+    industry: consulting
+    country: de
+  - name: KPMG
+    tier: normal
+    careers_url: "https://kpmg.com/xx/en/careers.html"
+    industry: consulting
+    country: de
+  - name: NTT DATA
+    tier: normal
+    careers_url: "https://careers.nttdata.com/"
+    industry: consulting
+    country: de
+  - name: Reply
+    tier: normal
+    careers_url: "https://www.reply.com/"
+    industry: consulting
+    country: de
+# Search terms for the employer platforms that take one (Workday, jobs.ch).
+#
+# Kept to families rather than exact titles: these are server-side searches, so
+# every extra term is another request to someone else's system, and the title
+# filtering afterwards is the part that does the precision work. Five terms
+# that each match broadly beat thirty that each match one phrasing.
 company_queries:
-  ["machine learning", "data scientist", "artificial intelligence",
-   "deep learning", "data engineer"]
+  ["machine learning", "artificial intelligence", "data scientist",
+   "deep learning", "data engineer", "computer vision", "algorithm",
+   "research engineer", "simulation", "analytics"]
 
 # ---------------------------------------------------------------------------
 # Company-independent boards
@@ -359,10 +1667,19 @@ company_queries:
 boards:
   enabled: [arbeitnow, jobsch]
   arbeitnow_pages: 4        # 250 postings per page, newest first
+  # Board searches. Wider than the employer-platform list because this is the
+  # discovery layer: an employer nobody configured only ever reaches CareerOS
+  # through one of these, and a term that is never searched is a company that
+  # is never found.
   queries:
     ["machine learning engineer", "ai engineer", "data scientist",
      "deep learning", "mlops engineer", "computer vision engineer",
-     "research engineer", "llm engineer"]
+     "research engineer", "llm engineer", "applied scientist",
+     "data engineer", "algorithm engineer", "perception engineer",
+     "nlp engineer", "generative ai", "ml platform engineer",
+     "analytics engineer", "simulation engineer", "robotics engineer",
+     "autonomous driving", "forecasting", "optimization engineer",
+     "decision scientist", "ai software engineer"]
   adzuna_countries: [de, ch, at, nl]
 
 # LinkedIn and Indeed are deliberately absent: both block automated access,
