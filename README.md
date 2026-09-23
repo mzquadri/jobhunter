@@ -1,18 +1,20 @@
-# CareerOS
+﻿# CareerOS
 
 Finds the AI/ML jobs worth applying to, explains why each one scored what it
-did, tracks the ones you pursue, and drafts the cover letter — so the work left
+did, tracks the ones you pursue, and drafts the cover letter â€” so the work left
 is reading and deciding, not searching.
 
-It reads 119 verified sources every hour, drops everything you could not take,
-and shows what survives. It never applies on your behalf.
+It checks official employer and ATS sources on an adaptive cadence, drops
+clearly unavailable or unrelated roles, and shows what survives. Employers
+without a safe structured source remain visible as a manual watchlist. It never
+applies on your behalf.
 
 ```
-~5,000 postings read  →  gates and scoring  →  ~65 worth applying to
+~5,000 postings read  â†’  gates and scoring  â†’  ~65 worth applying to
 ```
 
 **It is built around 60%, not 90%.** A recent graduate who meets roughly
-60% of what a posting describes should be applying to it — a job advert is an
+60% of what a posting describes should be applying to it â€” a job advert is an
 employer's wish list, not a minimum. So a missing Kubernetes, an ambitious
 "3+ years" and a preferred language lower the score and are named on the job;
 they do not delete it.
@@ -44,7 +46,7 @@ one scraper per company, and adding an employer is a line of YAML.
 
 Every automated employer in the shipped config was **probed against its real
 endpoint before being written down**. Of 279 plausible-looking candidates, 102
-did not exist — guessing produces a config where two rows in five claim to be
+did not exist â€” guessing produces a config where two rows in five claim to be
 monitored and fetch nothing. `python -m app.tools.verify_sources` is the tool
 that checked them, and it is in the repository so the next expansion can be
 checked the same way.
@@ -64,14 +66,14 @@ checked the same way.
 each answers "this opportunity is unavailable or is not this profession",
 never "this candidate is imperfect":
 
-1. **Not full-time** — Praktikum, Werkstudent, placements, VIE and PhD
+1. **Not full-time** â€” Praktikum, Werkstudent, placements, VIE and PhD
    positions. `graduate programme` and `trainee` are deliberately kept.
-2. **Not this field** — judged from the title *and* the description, graded
+2. **Not this field** â€” judged from the title *and* the description, graded
    certain / likely / possible. "Perception Engineer" and "Decision Scientist"
    survive on description evidence and pay a few points for the uncertainty.
    A title-only rule discarded them every scan.
-3. **Somewhere excluded** — a posting clearly outside Europe.
-4. **Too old** — nothing beyond `max_age_days`.
+3. **Somewhere excluded** â€” a posting clearly outside Europe.
+4. **Too old** â€” nothing beyond `max_age_days`.
 
 Everything else is a penalty, because a penalty is visible and arguable while
 a filter is silent. Seniority, a language you do not have, a location outside
@@ -85,11 +87,11 @@ explicit penalty on top of their sub-score.
 
 **Credits adjacent experience.** A TensorFlow posting is not closed to someone
 with two years of PyTorch. Requirements are grouped into families with a stated
-transfer factor, and every transfer is spelled out — *"asks for TensorFlow;
-your PyTorch experience transfers"* — rather than moving a number invisibly.
+transfer factor, and every transfer is spelled out â€” *"asks for TensorFlow;
+your PyTorch experience transfers"* â€” rather than moving a number invisibly.
 
 **Explains every score.** Seven sub-scores, the reasons behind them, and the
-gaps against your profile — all visible, none hidden behind a tooltip:
+gaps against your profile â€” all visible, none hidden behind a tooltip:
 
 ```
 Overall 78          Technical 86   Location 91   Freshness 100
@@ -98,7 +100,7 @@ Overall 78          Technical 86   Location 91   Freshness 100
 + Matches your genai experience: llm, rag, retrieval-augmented
 + Spans 5 of your skill areas
 + Advertised at graduate or junior level
-− Asks for azure, which is not on your profile
+âˆ’ Asks for azure, which is not on your profile
 ```
 
 **Classifies the language requirement** into nine levels, from *English only*
@@ -107,15 +109,22 @@ German postings are effectively closed to a non-fluent speaker, and knowing
 which in two seconds rather than two hours is most of the value here.
 
 **Never invents a salary.** A figure appears only when the employer printed
-one. Anything annualised or converted is marked `≈`, so a derived number is
+one. Anything annualised or converted is marked `â‰ˆ`, so a derived number is
 never mistaken for the employer's own. There is no market-data estimator,
-because there is no source for one — and a plausible guess is worse than an
+because there is no source for one â€” and a plausible guess is worse than an
 empty field, since it looks like information.
 
 **Tells you what broke.** A run that found nothing because six sources failed
 looks identical to a run where nothing was posted, unless the difference is
 recorded. Every source's outcome is stored per run and shown on the dashboard.
 
+## v3 source and review rules
+
+CareerOS prefers official employer and ATS sources over boards. The registry currently tracks 372 employers: 117 have verified automated sources and 255 remain explicit manual watchlist entries because no safe, repeatable structured endpoint has been verified. A manual employer is never counted as monitored automation.
+
+Providers use latest-first requests and posting-date cutoffs where supported. ETags, Last-Modified, and 304 responses are recorded as successful unchanged checks; a 304 is not a complete snapshot and cannot close jobs. Official provenance wins deduplication while board provenance is retained.
+
+Field relevance is stored separately from candidate match, with evidence and a requirement matrix for matched, transferable, partial, missing, and blocking requirements. Saved searches and review mode support a focused pass through new roles with J/K navigation, save, ignore, prepare, and official-posting actions.
 ## Quick start
 
 Requires Docker.
@@ -134,7 +143,7 @@ docker compose up -d --build
 Then open <http://localhost:3000>. The setup wizard runs on first visit and
 fills everything in from the defaults, so you can press Next through it and
 change your mind later in Settings. The copied config files are the seed for
-that first boot — they are yours, and both are gitignored.
+that first boot â€” they are yours, and both are gitignored.
 
 The worker scans on startup and then hourly, so the first roles appear within
 about a minute.
@@ -143,26 +152,26 @@ about a minute.
 | --- | --- |
 | The application | <http://localhost:3000> |
 | API | <http://localhost:8000> |
-| API reference | <http://localhost:8000/docs> — for extending it, not for using it |
+| API reference | <http://localhost:8000/docs> â€” for extending it, not for using it |
 
 ## The application
 
 | Screen | For |
 | --- | --- |
 | **Overview** | What changed since you last looked: high-priority roles, the larger "worth applying" list, career signals, shortlist radar, where the market is active, and coverage |
-| **Jobs** | The explorer. Opens on *Recommended* — match, plus nudges for freshness, employer priority and a language you have. Grouped one-click views, and a detail panel you can walk with `j`/`k` without losing your place |
+| **Jobs** | The explorer. Opens on *Recommended* â€” match, plus nudges for freshness, employer priority and a language you have. Grouped one-click views, and a detail panel you can walk with `j`/`k` without losing your place |
 | **Applications** | A pipeline board. Drag a role between stages, or move it from the menu on the card |
 | **Companies** | Who is watched, what state each source is actually in, and who publishes no feed at all |
-| **Automation** | What the scanner is doing and what it did — schedule, run history, per-source health |
+| **Automation** | What the scanner is doing and what it did â€” schedule, run history, per-source health |
 | **Analytics** | What the market looks like for your profile, including how much of it stated a salary |
 | **Settings** | Everything the scanner uses, in seven sections, each saving on its own |
 | **Set up** | A six-step wizard on first run. Everything is pre-filled; you can press Next through it |
 
-`⌘K` / `Ctrl+K` opens a command palette that searches jobs against the API,
+`âŒ˜K` / `Ctrl+K` opens a command palette that searches jobs against the API,
 jumps to any screen, starts a scan, or switches the theme. `/` focuses search.
 
 Keyboard, light and dark, empty states that say what to do next, and error
-states that say what went wrong — not a spinner that never resolves.
+states that say what went wrong â€” not a spinner that never resolves.
 
 ## Application tracking
 
@@ -175,18 +184,18 @@ follow-up, so the reminder is real rather than something you have to remember
 to set. Both are yours to change, and the delay is a setting.
 
 These fields are yours. **A discovery run never writes them**, so re-running is
-always safe — a sweep can refresh a score while your notes stay untouched. That
+always safe â€” a sweep can refresh a score while your notes stay untouched. That
 invariant is asserted directly in the test suite.
 
 ## Configuration
 
 **Settings live in the database and are edited in the Settings screen.** They
-take effect on the next scan — there is no file to edit and no restart.
+take effect on the next scan â€” there is no file to edit and no restart.
 
 The employer registry ships with **321 employers**: 117 with a verified feed
 that is read automatically, and the rest listed with a link because they
 publish nothing readable. Those are two different numbers and the interface
-prints them as two different numbers — an employer nothing fetches from is not
+prints them as two different numbers â€” an employer nothing fetches from is not
 "monitored". Job boards add to this on their own: a relevant role from a
 company nobody configured creates that company, so targeted coverage and open
 discovery work together.
@@ -211,57 +220,57 @@ Each setting, under its name in the Settings screen:
 | `search.max_age_days` | Hides anything older. Default 14 |
 | `search.min_score` | Below this a posting is noise |
 | `search.draft_min_score` | Only stronger matches get a cover-letter draft |
-| `locations.tiers` | Points per city — Munich 24, Germany 20, Switzerland 17 |
+| `locations.tiers` | Points per city â€” Munich 24, Germany 20, Switzerland 17 |
 | `locations.exclude` | Hard reject |
 | `scoring.weights` | How much each sub-score contributes |
-| `scoring.freshness_curve` | `[[days, score], …]`. Steep by design |
+| `scoring.freshness_curve` | `[[days, score], â€¦]`. Steep by design |
 | `flags` | Warning rules and what each costs |
 | `saved_searches` | Seeded on first boot; yours are never overwritten |
 
 `config/profile.yml` and `config/letter.md` are gitignored, and so is the
-database volume. The committed `*.example.*` files carry placeholders only —
+database volume. The committed `*.example.*` files carry placeholders only â€”
 your name, contact details, notes and application history never reach the
 repository.
 
 ## How matching works
 
-Each sub-score is 0–100, combined by the weights in your profile, then adjusted:
+Each sub-score is 0â€“100, combined by the weights in your profile, then adjusted:
 
 ```
-score = Σ(sub_score × weight)
+score = Î£(sub_score Ã— weight)
       + tier_bonus         (a shortlisted employer lifts a good match)
-      − seniority_penalty  (senior 30, lead 45, executive 60)
-      − language_penalty   (German B2 8, C1+ 22, native 30)
-      − location_penalty   (outside your tiers 26, or 10 if remote)
-      − relevance_discount (8 when the field was read from the description)
-      − flag_penalties     (EU-only 20, no-sponsorship 20, German 10)
+      âˆ’ seniority_penalty  (senior 30, lead 45, executive 60)
+      âˆ’ language_penalty   (German B2 8, C1+ 22, native 30)
+      âˆ’ location_penalty   (outside your tiers 26, or 10 if remote)
+      âˆ’ relevance_discount (8 when the field was read from the description)
+      âˆ’ flag_penalties     (EU-only 20, no-sponsorship 20, German 10)
 ```
 
 The four penalties are not decoration. Language is 13% of the weighted sum and
 location 20%, and neither share is enough to express *you cannot take this
-job* — a role demanding negotiation-level German and a role in Vietnam both
+job* â€” a role demanding negotiation-level German and a role in Vietnam both
 reached the high seventies on technical merit alone before these existed.
 
 The bands the interface uses:
 
 | Score | | |
 | --- | --- | --- |
-| 90–100 | Exceptional match | |
-| 80–89 | Strong match | own list at the top of the dashboard |
-| 70–79 | Good match | |
-| **60–69** | **Worth applying** | **the band the product is built around** |
-| 50–59 | Stretch | visible, not recommended |
+| 90â€“100 | Exceptional match | |
+| 80â€“89 | Strong match | own list at the top of the dashboard |
+| 70â€“79 | Good match | |
+| **60â€“69** | **Worth applying** | **the band the product is built around** |
+| 50â€“59 | Stretch | visible, not recommended |
 | under 50 | Low relevance | stored, not shown by default |
 
 Three thresholds, deliberately different numbers. `min_score` (25) decides what
-is **stored** — every scan re-scores, so a 43 today can be a 67 once you add a
+is **stored** â€” every scan re-scores, so a 43 today can be a 67 once you add a
 skill, and discarding it would need the whole market re-fetched to get it back.
 `recommend_min_score` (60) decides what is **shown**. `high_match_score` (80)
 decides what is shouted about.
 
 Nothing is random and nothing is a constant buried in code. The reasons shown
 in the interface are generated by the same calculation that produced the
-number — if it says "Strong PyTorch match", the technical sub-score rose
+number â€” if it says "Strong PyTorch match", the technical sub-score rose
 because the word PyTorch is in the posting.
 
 See [docs/architecture.md](docs/architecture.md) for the full pipeline,
@@ -278,7 +287,7 @@ that has never been checked is always due, so adding one shows results on the
 next run rather than after its tier elapses.
 
 One consequence is worth stating because getting it wrong is silent. A run may
-only close vacancies belonging to sources it actually asked — otherwise every
+only close vacancies belonging to sources it actually asked â€” otherwise every
 employer skipped by the cadence has all of their still-open roles marked closed
 and reopened four hours later.
 
@@ -286,7 +295,7 @@ and reopened four hours later.
 
 APScheduler inside a dedicated worker container, with its schedule persisted in
 PostgreSQL so it survives restarts. Every run first takes a Postgres advisory
-lock, so scaling to several workers cannot double-ingest — the loser skips its
+lock, so scaling to several workers cannot double-ingest â€” the loser skips its
 tick rather than queueing a duplicate sweep.
 
 No Redis, no broker. The database already provides durability and mutual
@@ -300,7 +309,7 @@ this workload needs.
 - **SSRF protection.** Provider responses supply URLs that this system then
   fetches. Every one is validated: HTTPS only, DNS resolved, private and
   link-local ranges refused.
-- **Ingested HTML is sanitised** at the boundary, twice — once on the raw
+- **Ingested HTML is sanitised** at the boundary, twice â€” once on the raw
   markup and again after entity decoding, so encoded markup cannot survive a
   single pass.
 - **Logs redact** anything resembling a credential.
@@ -312,7 +321,7 @@ this workload needs.
 ## Development
 
 ```bash
-# API — 328 tests
+# API â€” 328 tests
 cd api && pip install -e ".[dev]"
 ruff check . && pytest -q
 
@@ -321,7 +330,7 @@ cd web && npm install
 npm run typecheck && npm run lint && npm run build
 
 # regenerate the TypeScript client from the live OpenAPI schema
-# (the stack has to be running — it reads http://localhost:8000/openapi.json)
+# (the stack has to be running â€” it reads http://localhost:8000/openapi.json)
 npm run generate:types
 
 # migrations
@@ -339,11 +348,11 @@ CI runs all of it plus both Docker builds on every push.
 
 | Symptom | Cause |
 | --- | --- |
-| "CareerOS cannot reach its backend" | `docker compose ps` — is `api` healthy? |
+| "CareerOS cannot reach its backend" | `docker compose ps` â€” is `api` healthy? |
 | `migrate` exited with an error | `docker compose logs migrate`. `api` and `worker` wait for it deliberately |
 | No roles after the first boot | The first scan takes about a minute. **Automation** shows it running; `docker compose logs worker` has the detail |
-| A source shows as failed | Expected occasionally. It is backed off and retried later; see **Automation → Sources** |
-| A setting did not seem to apply | Settings apply from the *next* scan. **Automation → Scan now** makes that immediate |
+| A source shows as failed | Expected occasionally. It is backed off and retried later; see **Automation â†’ Sources** |
+| A setting did not seem to apply | Settings apply from the *next* scan. **Automation â†’ Scan now** makes that immediate |
 | Everything is `Not stated` for language | That source publishes only a short preview. The job panel links to the original |
 | The setup wizard keeps appearing | Setup is only marked complete when you finish it. Press **Open CareerOS** on the last step |
 
@@ -369,3 +378,4 @@ decide.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+

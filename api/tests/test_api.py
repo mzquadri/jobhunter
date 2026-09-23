@@ -142,6 +142,16 @@ class TestHealth:
 
 
 class TestListing:
+    def test_primary_feed_excludes_legacy_non_full_time_titles(
+        self, client, seeded, session_factory
+    ):
+        with session_factory() as session:
+            make_job(session, id="legacy|postdoc|delft", title="Postdoc in Computer Vision")
+            session.commit()
+        response = client.get("/api/jobs")
+        assert response.status_code == 200
+        assert all("postdoc" not in item["title"].lower() for item in response.json()["items"])
+
     def test_returns_open_jobs(self, client, seeded):
         body = client.get("/api/jobs").json()
         assert body["total"] == 2

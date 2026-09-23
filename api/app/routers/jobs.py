@@ -62,6 +62,16 @@ def apply_filters(
         stmt = stmt.where(Job.is_open.is_(True))
     if not include_hidden:
         stmt = stmt.where(Job.hidden.is_(False))
+    # A source may legitimately return a role that was previously accepted
+    # before the profile's full-time policy was tightened. Keep those legacy
+    # rows out of every product feed without treating the source as having
+    # closed the vacancy (closure still requires a complete source snapshot).
+    for excluded in (
+        "intern", "internship", "werkstudent", "working student", "praktikum",
+        "postdoc", "post-doc", "phd position", "doctoral position", "thesis",
+        "apprentice", "part-time", "part time", "freelance",
+    ):
+        stmt = stmt.where(~Job.title.ilike(f"%{excluded}%"))
     if only_new:
         stmt = stmt.where(Job.is_new.is_(True))
     if only_unseen:
