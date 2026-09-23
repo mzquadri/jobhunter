@@ -78,7 +78,9 @@ class Settings(BaseSettings):
     # ---- api ----
     log_level: str = "INFO"
     log_json: bool = True
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
+    )
     # Requests per minute per client for mutating endpoints.
     rate_limit_per_minute: int = 120
 

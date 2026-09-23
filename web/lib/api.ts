@@ -77,7 +77,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers: { "Content-Type": "application/json", ...init?.headers },
       cache: "no-store",
     });
-  } catch {
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+      console.warn("CareerOS backend request failed", {
+        origin: window.location.origin,
+        url: `${BASE}${path}`,
+        error,
+      });
+    }
     throw new ApiError("CareerOS cannot reach its backend.", 0);
   }
 
