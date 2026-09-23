@@ -36,6 +36,7 @@ class TestGates:
     @pytest.mark.parametrize("title", [
         "Praktikum Machine Learning", "Werkstudent Data Science (m/w/d)",
         "Machine Learning Internship", "PhD Position in Deep Learning",
+        "Postdoc in Computer Vision",
         "Data Science Industrial Placement", "VIE - Data Scientist",
     ])
     def test_rejects_non_full_time(self, engine, title):

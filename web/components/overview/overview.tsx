@@ -57,18 +57,18 @@ export function Overview() {
   const dream = useResource(() => api.companies({ tier: "dream" }), []);
 
   const recommend = stats.data?.recommend_min_score ?? 60;
-  const high = stats.data?.high_match_score ?? 80;
 
   // Two lists, one query each. The top list is what to read first; the second
   // is the larger set the whole product exists to stop you overlooking.
   const priority = useResource(
-    () => api.jobs({ min_score: high, sort: "newest", limit: 8 }),
-    [high],
-  );
-  const worth = useResource(
-    () => api.jobs({ min_score: recommend, sort: "newest", limit: 14 }),
+    () => api.jobs({ min_score: recommend, max_age_days: 14, english_compatible: true, only_clean: true, sort: "recommended", limit: 8 }),
     [recommend],
   );
+  const worth = useResource(
+    () => api.jobs({ min_score: recommend, max_age_days: 14, sort: "newest", limit: 14 }),
+    [recommend],
+  );
+  const newest = useResource(() => api.jobs({ max_age_days: 14, sort: "newest", limit: 6 }), []);
 
   const patchJob = useCallback(
     async (job: JobSummary, changes: { starred?: boolean; hidden?: boolean }) => {
@@ -119,11 +119,11 @@ export function Overview() {
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
         <div className="space-y-5">
           <JobList
-            title="High priority"
-            hint={`Scoring ${high} or above. Read these first.`}
+            title="Apply now"
+            hint={`Recent ${recommend}+ matches, English compatible, with no detected warning flags.`}
             jobs={priority.data?.items ?? []}
             loading={priority.loading && !priority.data}
-            href={`/jobs?min_score=${high}`}
+            href={`/jobs?min_score=${recommend}&english_compatible=true&max_age_days=14`}
             empty="Nothing at this level right now. The list below is where the realistic opportunities are."
             onOpen={setOpenJob}
             onPatch={patchJob}
@@ -132,7 +132,7 @@ export function Overview() {
           <JobList
             title="Worth applying"
             hint={
-              `Scoring ${recommend}–${high - 1}. You will not meet every line of these, ` +
+              `More recent roles scoring ${recommend}+. You will not meet every line of these, ` +
               `and that is the point — a job description is a wish list.`
             }
             jobs={worthOnly}
@@ -143,6 +143,10 @@ export function Overview() {
             onPatch={patchJob}
             emphasis
           />
+          <JobList title="New & relevant" hint="Newest postings in your field, across candidate-match bands."
+            jobs={newest.data?.items ?? []} loading={newest.loading && !newest.data}
+            href="/jobs?sort=newest&max_age_days=14" empty="No recent postings yet."
+            onOpen={setOpenJob} onPatch={patchJob} />
         </div>
 
         <div className="space-y-5">

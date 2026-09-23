@@ -12,6 +12,7 @@ from app.db import get_session
 from app.deps import profile_dep
 from app.models import ApplicationStatus, Company, CompanyTier, Job, StatusEvent, utcnow
 from app.models.base import LanguageRequirement
+from app.providers import BOARD_PROVIDERS, REGISTRY
 from app.routers.serialize import to_detail, to_summary
 from app.schemas import CountryCode, JobDetail, JobPage, JobPatch, SortKey
 from app.settings import Profile
@@ -43,6 +44,10 @@ def apply_filters(
     max_age_days: int | None = None,
     salary_min: int | None = None,
     only_new: bool = False,
+    only_unseen: bool = False,
+    official_only: bool = False,
+    english_compatible: bool = False,
+    min_relevance: int | None = None,
     only_starred: bool = False,
     only_clean: bool = False,
     include_hidden: bool = False,
@@ -59,6 +64,18 @@ def apply_filters(
         stmt = stmt.where(Job.hidden.is_(False))
     if only_new:
         stmt = stmt.where(Job.is_new.is_(True))
+    if only_unseen:
+        stmt = stmt.where(Job.reviewed_at.is_(None))
+    if official_only:
+        stmt = stmt.where(Job.source.in_(set(REGISTRY) - set(BOARD_PROVIDERS)))
+    if min_relevance is not None:
+        stmt = stmt.where(Job.field_relevance >= min_relevance)
+    if english_compatible:
+        stmt = stmt.where(Job.language_requirement.in_((
+            LanguageRequirement.ENGLISH_ONLY, LanguageRequirement.ENGLISH_PREFERRED,
+            LanguageRequirement.GERMAN_OPTIONAL, LanguageRequirement.GERMAN_BASIC,
+            LanguageRequirement.UNCLEAR,
+        )))
     if only_starred:
         stmt = stmt.where(Job.starred.is_(True))
     if only_clean:
@@ -181,6 +198,15 @@ def _recommend_rank():
 
 
 def apply_sort(stmt: Select, sort: SortKey) -> Select:
+    columns = {"field_relevance": Job.field_relevance, "experience": Job.score_experience,
+               "language": Job.score_language, "location": Job.score_location}
+    if sort in columns:
+        return stmt.order_by(columns[sort].desc().nullslast(), Job.score.desc(), Job.id.asc())
+    if sort == "company_priority":
+        return stmt.outerjoin(Company, Job.company_id == Company.id).order_by(
+            case((Company.tier == "dream", 3), (Company.tier == "high", 2), else_=1).desc(),
+            Job.score.desc(), Job.id.asc(),
+        )
     if sort == "recommended":
         # Outer, not inner: a role from an employer the registry has not caught
         # up with yet must still be rankable, just without a tier bonus.
@@ -218,9 +244,13 @@ def list_jobs(
     remote: str | None = Query(None, description="remote, hybrid, onsite or unknown"),
     seniority: str | None = None,
     min_score: int | None = Query(None, ge=0, le=100),
-    max_age_days: int | None = Query(None, ge=1, le=365),
+    max_age_days: int | None = Query(None, ge=0, le=365),
     salary_min: int | None = Query(None, ge=0),
     only_new: bool = False,
+    only_unseen: bool = False,
+    official_only: bool = False,
+    english_compatible: bool = False,
+    min_relevance: int | None = Query(None, ge=0, le=100),
     only_starred: bool = False,
     only_clean: bool = Query(False, description="Hide anything carrying a warning flag"),
     include_hidden: bool = False,
@@ -235,6 +265,8 @@ def list_jobs(
         language=language, source=source, status=status, domain=domain, remote=remote,
         seniority=seniority, min_score=min_score, max_age_days=max_age_days,
         salary_min=salary_min, only_new=only_new, only_starred=only_starred,
+        only_unseen=only_unseen, official_only=official_only,
+        english_compatible=english_compatible, min_relevance=min_relevance,
         only_clean=only_clean, include_hidden=include_hidden, include_closed=include_closed,
     )
     # Count in the database rather than materialising every matching row.

@@ -767,6 +767,15 @@ export interface components {
             is_open: boolean;
             /** Score */
             score: number;
+            /** Field Relevance */
+            field_relevance?: number | null;
+            /**
+             * Field Evidence
+             * @default
+             */
+            field_evidence: string;
+            /** Reviewed At */
+            reviewed_at?: string | null;
             sub_scores: components["schemas"]["SubScores"];
             /**
              * Match Reasons
@@ -888,6 +897,13 @@ export interface components {
              * @default []
              */
             history: components["schemas"]["StatusEventOut"][];
+            /**
+             * Requirements
+             * @default []
+             */
+            requirements: {
+                [key: string]: string;
+            }[];
         };
         /** JobPage */
         JobPage: {
@@ -907,6 +923,8 @@ export interface components {
         JobPatch: {
             /** Starred */
             starred?: boolean | null;
+            /** Reviewed At */
+            reviewed_at?: string | null;
             /** Hidden */
             hidden?: boolean | null;
             status?: components["schemas"]["ApplicationStatus"] | null;
@@ -991,6 +1009,15 @@ export interface components {
             is_open: boolean;
             /** Score */
             score: number;
+            /** Field Relevance */
+            field_relevance?: number | null;
+            /**
+             * Field Evidence
+             * @default
+             */
+            field_evidence: string;
+            /** Reviewed At */
+            reviewed_at?: string | null;
             sub_scores: components["schemas"]["SubScores"];
             /**
              * Match Reasons
@@ -1413,6 +1440,11 @@ export interface components {
              * @default []
              */
             by_industry: components["schemas"]["IndustryProgressOut"][];
+            /**
+             * Sources
+             * @default []
+             */
+            sources: components["schemas"]["RunProviderOut"][];
         };
         /** SettingsOut */
         SettingsOut: {
@@ -1574,12 +1606,16 @@ export interface operations {
                 max_age_days?: number | null;
                 salary_min?: number | null;
                 only_new?: boolean;
+                only_unseen?: boolean;
+                official_only?: boolean;
+                english_compatible?: boolean;
+                min_relevance?: number | null;
                 only_starred?: boolean;
                 /** @description Hide anything carrying a warning flag */
                 only_clean?: boolean;
                 include_hidden?: boolean;
                 include_closed?: boolean;
-                sort?: "recommended" | "newest" | "score" | "company" | "discovered" | "salary";
+                sort?: "recommended" | "newest" | "score" | "company" | "discovered" | "salary" | "field_relevance" | "experience" | "language" | "location" | "company_priority";
                 limit?: number;
                 offset?: number;
             };

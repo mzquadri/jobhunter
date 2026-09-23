@@ -35,6 +35,7 @@ import {
   Select,
   Separator,
   Skeleton,
+  ErrorState,
   Textarea,
 } from "@/components/ui/primitives";
 import { FlagBadges, MatchScore, ScoreBreakdown } from "@/components/jobs/shared";
@@ -53,6 +54,7 @@ export function JobDrawer({
   onChanged,
   siblings = [],
   onNavigate,
+  reviewMode = false,
 }: {
   jobId: string | null;
   onClose: () => void;
@@ -60,9 +62,11 @@ export function JobDrawer({
   /** The ids currently on screen, in the order they are shown. */
   siblings?: string[];
   onNavigate?: (id: string) => void;
+  reviewMode?: boolean;
 }) {
   const [job, setJob] = useState<JobDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [tab, setTab] = useState<"match" | "posting" | "tracking">("match");
 
   useEffect(() => {
@@ -71,17 +75,28 @@ export function JobDrawer({
       return;
     }
     let cancelled = false;
+    setJob(null);
+    setLoadError(false);
     setLoading(true);
     setTab("match");
     api
       .job(jobId)
-      .then((d) => !cancelled && setJob(d))
-      .catch(() => !cancelled && toast.error("Could not load that job."))
+      .then(async (d) => {
+        if (cancelled) return;
+        setJob(d);
+        if (reviewMode && !d.reviewed_at) {
+          const reviewed = await api.updateJob(d.id, { reviewed_at: new Date().toISOString() });
+          if (!cancelled) { setJob(reviewed); onChanged?.(reviewed); }
+        }
+      })
+      .catch(() => !cancelled && setLoadError(true))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [jobId]);
+  // onChanged is a notification, not a reason to reload a posting.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId, reviewMode]);
 
   const patch = useCallback(
     async (changes: Parameters<typeof api.updateJob>[1], message?: string) => {
@@ -120,22 +135,34 @@ export function JobDrawer({
     if (!jobId) return;
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
-      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
       if (event.key === "j" && goNext) {
         event.preventDefault();
         goNext();
       } else if (event.key === "k" && goPrevious) {
         event.preventDefault();
         goPrevious();
+      } else if (reviewMode && job && !loading) {
+        const key = event.key.toLowerCase();
+        if (!["s", "i", "a", "o"].includes(key)) return;
+        event.preventDefault();
+        if (key === "s") void patch({ starred: !job.starred }, job.starred ? "Unsaved" : "Saved");
+        if (key === "i") void patch({ hidden: !job.hidden }, job.hidden ? "Restored" : "Ignored — press I to undo");
+        if (key === "a") { setTab("tracking"); void patch({ status: "to_apply" }, "Preparing application"); }
+        if (key === "o") window.open(job.url, "_blank", "noopener,noreferrer");
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [jobId, goNext, goPrevious]);
+  }, [jobId, goNext, goPrevious, reviewMode, job, loading, patch]);
 
   return (
     <Drawer open={!!jobId} onClose={onClose} label="Job detail">
+      {reviewMode && <div className="border-b border-border px-4 py-2 text-[11px] text-muted-foreground">
+        Daily review · J/K navigate · S save · I ignore/undo · A prepare · O original
+      </div>}
+      {loadError && <ErrorState title="Could not load this job" message="Close the panel and try again." />}
       {loading && !job ? (
         <div className="space-y-3 p-5">
           <Skeleton className="h-7 w-2/3" />
@@ -304,6 +331,22 @@ function MatchTab({ job }: { job: JobDetail }) {
   return (
     <div className="space-y-5 p-4">
       <Verdict score={job.score} blocked={blocked} />
+      <section className="rounded-md border border-border p-3">
+        <div className="flex justify-between text-[12px] font-medium">
+          <span>Field relevance</span><span>{job.field_relevance == null ? "Awaiting next scan" : `${job.field_relevance}/100`}</span>
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground">{job.field_evidence || "Separate from candidate fit: is this role in your professional field?"}</p>
+      </section>
+      {!!job.requirements?.length && <section>
+        <h3 className="mb-2 text-[12px] font-medium">Skill comparison</h3>
+        <p className="mb-2 text-[11px] text-muted-foreground">Terms named in the posting; required versus preferred is not inferred.</p>
+        <div className="divide-y divide-border rounded-md border border-border">
+          {job.requirements.map((r, i) => <div key={`${r.name}-${i}`} className="px-3 py-2 text-[12px]">
+            <div className="flex justify-between gap-3"><span>{r.name}</span><Badge variant={r.state === "matched" ? "ok" : r.state === "transferable" ? "info" : "warn"}>{r.state}</Badge></div>
+            <p className="mt-1 text-[11px] text-muted-foreground">{r.evidence}</p>
+          </div>)}
+        </div>
+      </section>}
 
       <section>
         <p className="mb-2 text-[11px] font-medium text-muted-foreground">

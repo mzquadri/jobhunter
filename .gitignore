@@ -2,6 +2,8 @@
 # Personal data. None of this belongs in a public repository.
 # ---------------------------------------------------------------------------
 config/profile.yml
+config/profile.yml.*
+config/letter.md.*
 config/letter.md
 .env
 .env.local

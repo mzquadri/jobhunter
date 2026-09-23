@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal, advisory_lock
-from app.models import Company, Run, RunStatus, utcnow
+from app.models import Company, ProviderState, Run, RunStatus, utcnow
 from app.services.discovery import run_discovery
 from app.services.profile_service import load_document, load_profile
 from app.settings import get_settings
@@ -64,6 +64,7 @@ class ScanState:
     last_finished_at: datetime | None = None
     last_status: str = ""
     by_industry: list[IndustryProgress] = field(default_factory=list)
+    sources: list = field(default_factory=list)
 
 
 def current_run(session: Session) -> Run | None:
@@ -119,7 +120,7 @@ def scan_state(session: Session) -> ScanState:
 
     # Progress comes from rows the run has already committed, so it is real
     # rather than an animated guess.
-    done = len(running.providers or [])
+    done = sum(r.state != ProviderState.SKIPPED for r in running.providers or [])
     return ScanState(
         running=True,
         run_id=running.id,
@@ -132,6 +133,7 @@ def scan_state(session: Session) -> ScanState:
         last_finished_at=last.finished_at if last else None,
         last_status=last.status if last else "",
         by_industry=_industry_progress(session, running),
+        sources=[r for r in running.providers or [] if r.state != ProviderState.SKIPPED],
     )
 
 
@@ -164,6 +166,9 @@ def _industry_progress(session: Session, run: Run) -> list[IndustryProgress]:
         if industry is None:
             continue
         key = industry or "other"
+        if row.state == ProviderState.SKIPPED:
+            totals[key] = max(0, totals.get(key, 0) - 1)
+            continue
         done[key] = done.get(key, 0) + 1
         postings[key] = postings.get(key, 0) + (row.postings or 0)
 

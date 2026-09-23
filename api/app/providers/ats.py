@@ -61,7 +61,8 @@ class SmartRecruitersProvider(Provider):
                 ))
 
         return ProviderResult(sightings=sightings, requests_made=http.requests_made,
-                              capabilities={"date_filter": "client", "stale_dropped": stale})
+                              capabilities={"date_filter": "client", "stale_dropped": stale,
+                                            "complete_snapshot": True})
 
     def fetch_detail(self, sighting, ctx) -> str:
         # The posting id is enough to rebuild the detail endpoint, and the
@@ -90,6 +91,7 @@ class SuccessFactorsProvider(Provider):
     """
 
     name = "successfactors"
+    conditional_listing = True
     PATH = "/services/rss/job/?locale=en_US"
 
     def fetch(self, target, company, tier, ctx) -> ProviderResult:
@@ -120,7 +122,8 @@ class SuccessFactorsProvider(Provider):
 
         return ProviderResult(
             sightings=sightings, requests_made=http.requests_made,
-            capabilities={"date_filter": "feed-is-newest-first", "stale_dropped": stale},
+            capabilities={"date_filter": "feed-is-newest-first", "stale_dropped": stale,
+                          "complete_snapshot": True},
         )
 
 
@@ -128,11 +131,14 @@ class GreenhouseProvider(Provider):
     """Target: the board slug, e.g. ``helsing``."""
 
     name = "greenhouse"
+    conditional_listing = True
     BASE = "https://boards-api.greenhouse.io/v1/boards"
 
     def fetch(self, target, company, tier, ctx) -> ProviderResult:
         http = Http(ctx)
         data = http.get_json(f"{self.BASE}/{target}/jobs")
+        if not isinstance(data.get("jobs"), list):
+            raise ValueError("expected a Greenhouse jobs array")
 
         sightings, stale = [], 0
         for job in data.get("jobs") or []:
@@ -152,7 +158,8 @@ class GreenhouseProvider(Provider):
             ))
 
         return ProviderResult(sightings=sightings, requests_made=http.requests_made,
-                              capabilities={"date_filter": "client", "stale_dropped": stale})
+                              capabilities={"date_filter": "client", "stale_dropped": stale,
+                                            "complete_snapshot": True})
 
     def fetch_detail(self, sighting, ctx) -> str:
         match = re.search(r"greenhouse\.io/([^/]+)/jobs/", sighting.url)
@@ -169,11 +176,14 @@ class LeverProvider(Provider):
     """Target: the company slug. Lever returns full text in the listing."""
 
     name = "lever"
+    conditional_listing = True
 
     def fetch(self, target, company, tier, ctx) -> ProviderResult:
         http = Http(ctx)
         data = http.get_json(f"https://api.lever.co/v0/postings/{target}",
                              params={"mode": "json"})
+        if not isinstance(data, list):
+            raise ValueError("expected a Lever postings array")
 
         sightings, stale = [], 0
         for job in data if isinstance(data, list) else []:
@@ -189,16 +199,19 @@ class LeverProvider(Provider):
                 url=url, location=(job.get("categories") or {}).get("location") or "",
                 external_id=str(job.get("id") or ""), posted=posted,
                 description=job.get("descriptionPlain") or "", tier=tier,
+                structured={"employment_type": (job.get("categories") or {}).get("commitment", "")},
             ))
 
         return ProviderResult(sightings=sightings, requests_made=http.requests_made,
-                              capabilities={"date_filter": "client", "stale_dropped": stale})
+                              capabilities={"date_filter": "client", "stale_dropped": stale,
+                                            "complete_snapshot": True})
 
 
 class AshbyProvider(Provider):
     """Target: the job-board slug, e.g. ``deepl``."""
 
     name = "ashby"
+    conditional_listing = True
     BASE = "https://api.ashbyhq.com/posting-api/job-board"
 
     def fetch(self, target, company, tier, ctx) -> ProviderResult:
@@ -223,16 +236,19 @@ class AshbyProvider(Provider):
                                        or job.get("descriptionPlain") or ""),
                 tier=tier,
                 salary_hint=str(job.get("compensation") or "")[:200],
+                structured={"employment_type": job.get("employmentType", "")},
             ))
 
         return ProviderResult(sightings=sightings, requests_made=http.requests_made,
-                              capabilities={"date_filter": "client", "stale_dropped": stale})
+                              capabilities={"date_filter": "client", "stale_dropped": stale,
+                                            "complete_snapshot": True})
 
 
 class PersonioProvider(Provider):
     """Target: the subdomain, e.g. ``proglove``. Personio publishes XML."""
 
     name = "personio"
+    conditional_listing = True
 
     def fetch(self, target, company, tier, ctx) -> ProviderResult:
         http = Http(ctx)
@@ -259,16 +275,19 @@ class PersonioProvider(Provider):
                 # Personio's feed carries no publication date at all, so none
                 # is claimed. The pipeline treats it as undated rather than new.
                 posted="", description=description[:40_000], tier=tier,
+                structured={"employment_type": f"{tag('employmentType')} {tag('schedule')}"},
             ))
 
         return ProviderResult(sightings=sightings, requests_made=http.requests_made,
-                              capabilities={"date_filter": "none", "provides_dates": False})
+                              capabilities={"date_filter": "none", "provides_dates": False,
+                                            "complete_snapshot": True})
 
 
 class WorkableProvider(Provider):
     """Target: the account slug, e.g. ``agile-robots``."""
 
     name = "workable"
+    conditional_listing = True
     BASE = "https://apply.workable.com/api/v1/widget/accounts"
 
     def fetch(self, target, company, tier, ctx) -> ProviderResult:
@@ -293,4 +312,5 @@ class WorkableProvider(Provider):
             ))
 
         return ProviderResult(sightings=sightings, requests_made=http.requests_made,
-                              capabilities={"date_filter": "client", "stale_dropped": stale})
+                              capabilities={"date_filter": "client", "stale_dropped": stale,
+                                            "complete_snapshot": True})

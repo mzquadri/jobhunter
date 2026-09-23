@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -30,6 +31,13 @@ from sqlalchemy import false, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.dedup import JobGroup, Sighting, deduplicate
+from app.enrich.relevance import (
+    ADJACENT_TITLE,
+    GENERIC_TITLE,
+    OUT_OF_FIELD_TITLE,
+    Relevance,
+    RelevanceVerdict,
+)
 from app.enrich.text import summarise
 from app.matching import MatchEngine, MatchResult
 from app.models import (
@@ -54,6 +62,7 @@ from app.providers import (
     run_provider,
 )
 from app.providers.dates import days_old
+from app.providers.identify import identify_official_source
 from app.security import RateLimit
 from app.services import health, signals
 from app.services.drafts import Drafter, DraftInput
@@ -68,6 +77,7 @@ class Task:
     target: str
     company: str
     tier: str
+    cache: dict = field(default_factory=dict)
 
 
 def _as_date(text: str) -> date | None:
@@ -92,11 +102,16 @@ def run_discovery(
         sync_companies(session, profile)
         tasks = _build_tasks(session, profile, settings, run)
 
-        sightings, provider_rows = _collect(tasks, profile, settings)
-        for row in provider_rows:
+        run.providers_checked = len(tasks)
+        session.commit()
+
+        def progress(row: RunProvider) -> None:
             row.run_id = run.id
             session.add(row)
-        session.commit()
+            run.postings_seen += row.postings
+            session.commit()
+
+        sightings, provider_rows = _collect(tasks, profile, settings, progress)
         apply_health(session, provider_rows, settings)
 
         groups = deduplicate(sightings)
@@ -118,15 +133,25 @@ def run_discovery(
 
         # Which sources this run actually asked. Anything else must not have
         # its vacancies closed just because they were not seen this time.
+        complete = {
+            (r.provider, r.target) for r in provider_rows
+            if r.state == ProviderState.HEALTHY
+            and r.capabilities.get("complete_snapshot") is True
+        }
         asked_company_ids = {
             slugify(t.company)
             for t in tasks
             if t.company and t.provider not in BOARD_PROVIDERS
+            and (t.provider, t.company) in complete
         }
-        asked_boards = {t.provider for t in tasks if t.provider in BOARD_PROVIDERS}
+        asked_boards = {
+            t.provider for t in tasks if t.provider in BOARD_PROVIDERS
+            and (t.provider, t.provider) in complete
+        }
 
         new_ids, updated, closed = _persist(
-            session, scored, profile, asked_company_ids, asked_boards
+            session, scored, profile, asked_company_ids, asked_boards,
+            observed_ids={g.key for g in groups},
         )
         drafts = _write_drafts(session, scored, new_ids, profile, settings)
         _refresh_company_counts(session)
@@ -243,14 +268,20 @@ def adopt_discovered_companies(session: Session, groups: list[JobGroup]) -> int:
             known[_match_key(name)] = company_id
             continue
 
+        identified = next((
+            (identify_official_source(s.url), s.url) for s in group.sightings
+            if identify_official_source(s.url)
+        ), None)
+        adapter, target = identified[0] if identified else (None, None)
         session.add(Company(
             id=company_id,
             name=name[:200],
             tier=CompanyTier.NORMAL,
-            adapter=None,
-            source_status=SourceStatus.MANUAL,
+            adapter=adapter,
+            adapter_arg=target,
+            source_status=SourceStatus.IDLE if adapter else SourceStatus.MANUAL,
             discovered_from=group.primary.provider[:40],
-            careers_url="",
+            careers_url=identified[1] if identified else "",
             enabled=True,
         ))
         known[_match_key(name)] = company_id
@@ -321,7 +352,7 @@ def _build_tasks(
         if company.adapter not in REGISTRY:
             log.warning("company %s names unknown adapter %r", company.name, company.adapter)
             continue
-        key = health.health_key(company.adapter, company.adapter_arg or "")
+        key = health.health_key(company.adapter, company.name)
         if health.is_backed_off(known.get(key)):
             session.add(RunProvider(
                 run_id=run.id, provider=company.adapter, target=company.name,
@@ -335,15 +366,16 @@ def _build_tasks(
                 error=f"not due yet ({CADENCE_MINUTES.get(company.tier, 0)}m cadence)",
             ))
             continue
+        record = known.get(key)
         tasks.append(Task(company.adapter, company.adapter_arg or "",
-                          company.name, company.tier))
+                          company.name, company.tier, record.fetch_state if record else {}))
 
     boards = profile.boards.get("enabled", [])
     for board in boards:
         if board not in REGISTRY or board not in BOARD_PROVIDERS:
             log.warning("unknown board %r", board)
             continue
-        key = health.health_key(board, "")
+        key = health.health_key(board, board)
         if health.is_backed_off(known.get(key)):
             continue
         target = str(profile.boards.get("arbeitnow_pages", 4)) if board == "arbeitnow" else ""
@@ -372,7 +404,8 @@ def _client(settings: Settings) -> httpx.Client:
 
 
 def _collect(
-    tasks: list[Task], profile: Profile, settings: Settings
+    tasks: list[Task], profile: Profile, settings: Settings,
+    on_result: Callable[[RunProvider], None] | None = None,
 ) -> tuple[list[Sighting], list[RunProvider]]:
     board_queries = profile.boards.get("queries", []) or profile.company_queries
     limiter = RateLimit(per_minute=90)
@@ -387,6 +420,7 @@ def _collect(
             ctx = FetchContext(
                 queries=queries, max_age_days=profile.max_age_days,
                 settings=settings, client=client, limiter=limiter,
+                cache=task.cache or {},
             )
             began = time.monotonic()
             result = run_provider(
@@ -396,7 +430,9 @@ def _collect(
             return task, result, int((time.monotonic() - began) * 1000)
 
         with ThreadPoolExecutor(max_workers=settings.max_workers) as pool:
-            for task, result, elapsed in pool.map(work, tasks):
+            futures = [pool.submit(work, task) for task in tasks]
+            for future in as_completed(futures):
+                task, result, elapsed = future.result()
                 sightings.extend(result.sightings)
                 if result.rate_limited:
                     state = ProviderState.RATE_LIMITED
@@ -414,6 +450,9 @@ def _collect(
                     error=result.error,
                     capabilities=result.capabilities,
                 ))
+                rows[-1]._fetch_state = result.fetch_state
+                if on_result:
+                    on_result(rows[-1])
 
     return sightings, rows
 
@@ -424,12 +463,17 @@ def apply_health(session: Session, rows: list[RunProvider], settings: Settings) 
         if row.state == ProviderState.SKIPPED:
             continue
         if row.state == ProviderState.HEALTHY:
-            health.record_success(session, row.provider, row.target, row.capabilities)
+            record = health.record_success(session, row.provider, row.target, row.capabilities)
+            if state := getattr(row, "_fetch_state", None):
+                record.fetch_state = state
         else:
-            health.record_failure(
+            record = health.record_failure(
                 session, row.provider, row.target, row.error, settings,
                 rate_limited=row.state == ProviderState.RATE_LIMITED,
             )
+            retry_after = (row.capabilities or {}).get("retry_after_seconds")
+            if retry_after is not None:
+                record.backoff_until = utcnow() + timedelta(seconds=max(0, retry_after))
     session.commit()
     _apply_source_status(session, rows)
 
@@ -479,9 +523,10 @@ def _apply_source_status(session: Session, rows: list[RunProvider]) -> None:
         if company.source_status != status:
             company.source_status = status
             changed += 1
+        company.last_checked_at = now
 
+    session.commit()
     if changed:
-        session.commit()
         log.info("%d employer source states changed", changed)
 
 
@@ -498,7 +543,20 @@ def _shortlist(groups: list[JobGroup], engine: MatchEngine) -> list[JobGroup]:
             primary.company, primary.tier,
             days_old(group.earliest_posted()), primary.tags, primary.structured,
         )
-        if verdict.keep:
+        # A short ATS listing is not enough evidence to reject an ambiguous
+        # engineering title. Fetch its description before the final gate.
+        ambiguous = (
+            verdict.reject_reason != "not a full-time position"
+            and
+            len(group.best_description()) < 400
+            and not OUT_OF_FIELD_TITLE.search(primary.title)
+            and (ADJACENT_TITLE.search(primary.title) or GENERIC_TITLE.search(primary.title))
+            and not engine._gate(
+                primary.title, primary.location, days_old(group.earliest_posted()),
+                RelevanceVerdict(Relevance.POSSIBLE, 0.0, "awaiting description"),
+            )
+        )
+        if verdict.keep or ambiguous:
             kept.append(group)
     return kept
 
@@ -560,6 +618,8 @@ def _persist(
     profile: Profile,
     asked_company_ids: set[str],
     asked_boards: set[str],
+    *,
+    observed_ids: set[str] | None = None,
 ) -> tuple[set[str], int, int]:
     now = utcnow()
     seen_ids = {group.key for group, _ in scored}
@@ -588,6 +648,13 @@ def _persist(
         else:
             updated += 1
 
+        retain_official = bool(
+            row.source and row.source not in BOARD_PROVIDERS
+            and primary.provider in BOARD_PROVIDERS
+        )
+        canonical = (row.title, row.title_normalized, row.url, row.source, row.description,
+                     row.posted_at)
+
         # ---- run-owned columns -----------------------------------------
         row.company_name = primary.company[:200]
         row.company_id = companies.get(_match_key(primary.company))
@@ -603,6 +670,9 @@ def _persist(
         row.summary = _summary(group.best_description())
         row.posted_at = _as_date(group.earliest_posted())
         row.source = primary.provider
+        if retain_official:
+            (row.title, row.title_normalized, row.url, row.source,
+             row.description, row.posted_at) = canonical
 
         row.seniority = result.seniority
         row.experience_min_years = result.experience_min_years
@@ -624,6 +694,9 @@ def _persist(
         row.domains = result.domains
         row.role_category = result.role_category[:48]
         row.score = result.score
+        row.field_relevance = result.field_relevance
+        row.field_evidence = result.field_evidence
+        row.requirements = result.requirements
         sub = result.sub
         row.score_technical = sub.technical
         row.score_experience = sub.experience
@@ -666,12 +739,15 @@ def _persist(
     # Coverage is per source, not per run: an employer's jobs are closable only
     # when that employer was asked, and a board's jobs only when that board ran.
     covered = or_(
-        Job.company_id.in_(asked_company_ids) if asked_company_ids else false(),
+        (Job.company_id.in_(asked_company_ids) & Job.source.notin_(BOARD_PROVIDERS))
+        if asked_company_ids else false(),
         Job.source.in_(asked_boards) if asked_boards else false(),
     )
     closed = session.execute(
         update(Job)
-        .where(Job.is_open.is_(True), Job.id.notin_(seen_ids or {""}), covered)
+        .where(Job.is_open.is_(True),
+               Job.id.notin_((observed_ids if observed_ids is not None else seen_ids) or {""}),
+               covered)
         .values(is_open=False, removed_at=now)
     ).rowcount or 0
 
@@ -700,7 +776,7 @@ def _sync_sources(session: Session, row: Job, group: JobGroup, now) -> None:
         source.url = sighting.url
         source.posted_at = _as_date(sighting.posted)
         source.last_seen_at = now
-        source.is_primary = sighting is group.primary
+        source.is_primary = sighting.provider == row.source and sighting.url == row.url
 
 
 def _summary(text: str) -> str:
@@ -725,8 +801,6 @@ def _refresh_company_counts(session: Session) -> None:
     for company in session.scalars(select(Company)).all():
         company.open_roles = open_counts.get(company.id, 0)
         company.new_roles_7d = new_counts.get(company.id, 0)
-        if company.adapter:
-            company.last_checked_at = utcnow()
     session.commit()
 
 

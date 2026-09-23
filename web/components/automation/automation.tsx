@@ -145,6 +145,13 @@ export function Automation() {
         {state?.running && state.by_industry.length > 0 && (
           <ScanBreakdown industries={state.by_industry} />
         )}
+        {state?.running && !!state.sources?.length && <div className="mt-3 max-h-64 overflow-auto border-t border-border pt-2">
+          <p className="mb-2 text-[11px] text-muted-foreground">Completed sources · listing counts before relevance scoring</p>
+          {state.sources.map((source) => <div key={`${source.provider}-${source.target}`} className="flex items-center justify-between gap-3 py-1 text-[12px]">
+            <span className="truncate">{source.target}</span>
+            <span className="shrink-0 tabular text-muted-foreground">{source.state === "healthy" ? `${source.postings} listings` : source.state}{source.capabilities?.not_modified ? " · unchanged" : ""}</span>
+          </div>)}
+        </div>}
       </Card>
 
       {/* cadence */}

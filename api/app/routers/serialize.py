@@ -82,6 +82,9 @@ def _base_fields(job: Job, tier: str) -> dict:
         "is_new": job.is_new,
         "is_open": job.is_open,
         "score": job.score,
+        "field_relevance": job.field_relevance,
+        "field_evidence": job.field_evidence or "",
+        "reviewed_at": job.reviewed_at,
         "sub_scores": SubScores(
             technical=job.score_technical,
             experience=job.score_experience,
@@ -118,6 +121,7 @@ def to_detail(job: Job, tier: str = "normal") -> JobDetail:
     detail = JobDetail(
         **_base_fields(job, tier),
         description=job.description or "",
+        requirements=job.requirements or [],
         summary=job.summary or "",
         language_evidence=job.language_evidence or "",
         employment_type=job.employment_type,

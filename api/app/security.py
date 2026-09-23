@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import threading
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -116,21 +117,22 @@ class RateLimit:
 
     def __post_init__(self) -> None:
         self._hits = defaultdict(deque)
+        self._lock = threading.Lock()
 
     def wait(self, host: str) -> float:
         """Block until another request to ``host`` is allowed. Returns the
         time spent waiting, so callers can report it."""
         if self.per_minute <= 0:
             return 0.0
-        window = self._hits[host]
-        now = time.monotonic()
-        while window and now - window[0] > 60:
-            window.popleft()
-        if len(window) < self.per_minute:
-            window.append(now)
-            return 0.0
-        sleep_for = 60 - (now - window[0]) + 0.01
-        time.sleep(max(0.0, sleep_for))
-        window.popleft()
-        window.append(time.monotonic())
-        return sleep_for
+        started = time.monotonic()
+        while True:
+            with self._lock:
+                window = self._hits[host]
+                now = time.monotonic()
+                while window and now - window[0] >= 60:
+                    window.popleft()
+                if len(window) < self.per_minute:
+                    window.append(now)
+                    return now - started
+                sleep_for = 60 - (now - window[0]) + 0.01
+            time.sleep(max(0.0, sleep_for))

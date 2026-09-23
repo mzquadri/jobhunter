@@ -56,7 +56,14 @@ class ArbeitnowProvider(Provider):
                     tags=" ".join(job.get("tags") or [])
                          + " " + " ".join(job.get("job_types") or []),
                     tier="normal",
+                    structured={"employment_type": " ".join(job.get("job_types") or [])},
                 ))
+
+            if self.page_is_stale(
+                [from_any(j.get("created_at")) for j in rows],
+                ctx.max_age_days, newest_first=True,
+            ):
+                break
 
         return ProviderResult(sightings=sightings, requests_made=http.requests_made,
                               capabilities={"date_filter": "client", "stale_dropped": stale,

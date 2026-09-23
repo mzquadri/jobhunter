@@ -118,6 +118,9 @@ class Job(Base):
 
     # ---- match, all explainable ----------------------------------------
     score: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    field_relevance: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    field_evidence: Mapped[str] = mapped_column(Text, default="")
+    requirements: Mapped[list] = mapped_column(JSON, default=list)
     score_technical: Mapped[int] = mapped_column(Integer, default=0)
     score_experience: Mapped[int] = mapped_column(Integer, default=0)
     score_language: Mapped[int] = mapped_column(Integer, default=0)
@@ -136,6 +139,7 @@ class Job(Base):
 
     # ---- owned by the candidate; a sweep must never write these ---------
     status: Mapped[str] = mapped_column(String(24), default=ApplicationStatus.NEW, index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status_changed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

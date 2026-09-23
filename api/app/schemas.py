@@ -18,7 +18,8 @@ from app.enrich.seniority import SENIORITY_LABELS
 from app.models.base import ApplicationStatus, SalaryBasis
 
 SortKey = Literal[
-    "recommended", "newest", "score", "company", "discovered", "salary"
+    "recommended", "newest", "score", "company", "discovered", "salary",
+    "field_relevance", "experience", "language", "location", "company_priority"
 ]
 CountryCode = Literal["de", "ch", "at", "nl", "eu"]
 
@@ -86,6 +87,9 @@ class JobSummary(BaseModel):
     is_open: bool
 
     score: int
+    field_relevance: int | None = None
+    field_evidence: str = ""
+    reviewed_at: datetime | None = None
     sub_scores: SubScores
     match_reasons: list[str] = []
     match_gaps: list[str] = []
@@ -146,6 +150,7 @@ class JobDetail(JobSummary):
     salary_discussion: str = ""
     sources: list[JobSourceOut] = []
     history: list[StatusEventOut] = []
+    requirements: list[dict[str, str]] = []
 
 
 class JobPage(BaseModel):
@@ -161,6 +166,7 @@ class JobPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     starred: bool | None = None
+    reviewed_at: datetime | None = None
     hidden: bool | None = None
     status: ApplicationStatus | None = None
     notes: Annotated[str, Field(max_length=20_000)] | None = None
@@ -332,6 +338,7 @@ class SavedSearchIn(BaseModel):
             "source", "status", "domain", "remote", "seniority",
             "min_score", "max_age_days", "salary_min", "only_new",
             "only_starred", "only_clean", "sort",
+            "only_unseen", "official_only", "english_compatible", "min_relevance",
         }
         unknown = set(value) - allowed
         if unknown:
@@ -462,6 +469,7 @@ class ScanStateOut(BaseModel):
     last_status: str = ""
     #: Real completed/total per industry while a scan runs. Empty when idle.
     by_industry: list[IndustryProgressOut] = []
+    sources: list[RunProviderOut] = []
 
 
 class SettingsOut(BaseModel):
