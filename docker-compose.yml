@@ -45,7 +45,7 @@ services:
     ports:
       # Exposed for a local SQL client. Remove this line to keep the database
       # reachable only from inside the compose network.
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jobhunter} -d ${POSTGRES_DB:-jobhunter}"]
       interval: 5s
@@ -86,7 +86,7 @@ services:
       - ./config:/app/config:ro
       - ./data/drafts:/data/drafts
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
 
   worker:
     <<: *api-image
@@ -132,7 +132,7 @@ services:
       # is baked in at build time and must be a host-reachable address.
       API_INTERNAL_URL: http://api:8000
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
 
 volumes:
   pgdata:

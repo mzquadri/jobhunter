@@ -103,6 +103,8 @@ class ProviderHealth(Base):
     # While set in the future, the source is skipped.
     backoff_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     capabilities: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Internal conditional-fetch state. Not exposed by the health API.
+    fetch_state: Mapped[dict] = mapped_column(JSON, default=dict)
 
     @property
     def success_rate(self) -> float:

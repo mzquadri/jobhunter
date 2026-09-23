@@ -11,7 +11,7 @@ never retried is a source that is silently lost.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -29,7 +29,12 @@ def load_all(session: Session) -> dict[str, ProviderHealth]:
 
 
 def is_backed_off(record: ProviderHealth | None) -> bool:
-    return bool(record and record.backoff_until and record.backoff_until > utcnow())
+    if not record or not record.backoff_until:
+        return False
+    until = record.backoff_until
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=UTC)
+    return until > utcnow()
 
 
 def record_success(

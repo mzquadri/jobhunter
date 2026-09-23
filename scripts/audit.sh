@@ -29,7 +29,7 @@ for path in ".env" "config/profile.yml" "config/letter.md"; do
   fi
 done
 
-for pattern in "data/" "exports/" "*.xlsx" "*.csv" "*.sqlite" "*.db" "*.pem" "*.key"; do
+for pattern in "config/profile.yml*" "config/letter.md*" "data/" "exports/" "*.xlsx" "*.csv" "*.sqlite" "*.db" "*.pem" "*.key"; do
   matches=$(git ls-files -- "$pattern" 2>/dev/null | head -5)
   if [ -n "$matches" ]; then
     fail "$pattern is tracked: $(echo "$matches" | tr '\n' ' ')"
@@ -56,7 +56,7 @@ for entry in "${PATTERNS[@]}"; do
   regex="${entry%%:*}"; label="${entry##*:}"
   hits=$(echo "$tracked" | xargs grep -InE "$regex" 2>/dev/null \
          | grep -vE '(example|sample|placeholder|change-me|your-|CHANGEME|audit\.sh)' \
-         | head -5)
+         | cut -d: -f1-2 | head -5)
   if [ -n "$hits" ]; then
     fail "$label found:"
     echo "$hits" | sed 's/^/        /'
@@ -69,10 +69,10 @@ echo
 echo "=== personal data in tracked content ==="
 # Contact details belong in config/profile.yml, which is gitignored.
 personal=$(echo "$tracked" | xargs grep -InE \
-  '\+[0-9]{2}[0-9 ()-]{9,}|[A-Za-z0-9._%+-]+@(?!example\.com)[A-Za-z0-9.-]+\.(de|com|org|net)' \
-  2>/dev/null | grep -vE '(example\.com|example\.org|noreply|your@|you@|audit\.sh|user_agent|github\.com)' | head -5)
+  '\+[0-9]{2}[0-9 ()-]{9,}|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.(de|com|org|net)' \
+  2>/dev/null | grep -vE '(example\.com|example\.org|noreply|your@|you@|audit\.sh|user_agent|github\.com|\+49 000)' | cut -d: -f1-2 | head -5)
 if [ -n "$personal" ]; then
-  warn "possible contact details in tracked files — check these are placeholders:"
+  fail "possible contact details in tracked files — check these are placeholders:"
   echo "$personal" | sed 's/^/        /'
 else
   pass "no phone numbers or personal email addresses"

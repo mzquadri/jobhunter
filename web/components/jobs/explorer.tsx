@@ -29,6 +29,7 @@ import {
   Button,
   Card,
   EmptyState,
+  Drawer,
   ErrorState,
   Input,
   Page,
@@ -84,8 +85,10 @@ const QUICK_GROUPS: { group: string; views: QuickView[] }[] = [
     group: "freshness",
     views: [
       { id: "new", label: "New", key: "only_new", value: true },
-      { id: "today", label: "Today", key: "max_age_days", value: 1 },
+      { id: "today", label: "Today", key: "max_age_days", value: 0 },
+      { id: "24h", label: "Since yesterday", key: "max_age_days", value: 1 },
       { id: "3d", label: "3 days", key: "max_age_days", value: 3 },
+      { id: "7d", label: "7 days", key: "max_age_days", value: 7 },
     ],
   },
   {
@@ -100,7 +103,7 @@ const QUICK_GROUPS: { group: string; views: QuickView[] }[] = [
   },
   {
     group: "language",
-    views: [{ id: "english", label: "English-first", key: "language", value: "english_only" }],
+    views: [{ id: "english", label: "English compatible", key: "english_compatible", value: true }],
   },
   {
     group: "field",
@@ -117,6 +120,8 @@ const QUICK_GROUPS: { group: string; views: QuickView[] }[] = [
     views: [
       { id: "dream", label: "Dream companies", key: "tier", value: "dream" },
       { id: "saved", label: "Saved", key: "only_starred", value: true },
+      { id: "unseen", label: "Unseen", key: "only_unseen", value: true },
+      { id: "official", label: "Official only", key: "official_only", value: true },
     ],
   },
 ];
@@ -152,13 +157,16 @@ export function JobExplorer() {
     // whether the language is one you have. Newest is one click away.
     sort: (params.get("sort") as JobQuery["sort"]) ?? "recommended",
     only_new: params.get("only_new") === "true" || undefined,
+    only_unseen: params.get("only_unseen") === "true" || undefined,
+    official_only: params.get("official_only") === "true" || undefined,
+    english_compatible: params.get("english_compatible") === "true" || undefined,
     only_starred: params.get("only_starred") === "true" || undefined,
     min_score: params.get("min_score")
       ? Number(params.get("min_score"))
       : untouched
         ? WORTH_APPLYING
         : undefined,
-    max_age_days: params.get("max_age_days") ? Number(params.get("max_age_days")) : undefined,
+    max_age_days: params.get("max_age_days") !== null ? Number(params.get("max_age_days")) : untouched ? 14 : undefined,
     country: (params.get("country") as JobQuery["country"]) ?? undefined,
     tier: params.get("tier") ?? undefined,
     language: params.get("language") ?? undefined,
@@ -175,6 +183,9 @@ export function JobExplorer() {
   const [view, setView] = useState<"table" | "cards">("table");
   const [showFilters, setShowFilters] = useState(false);
   const [openJob, setOpenJob] = useState<string | null>(params.get("open"));
+  const [reviewMode, setReviewMode] = useState(false);
+  const [viewName, setViewName] = useState("");
+  const savedViews = useResource(() => api.searches(), []);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useHotkey("/", () => searchRef.current?.focus());
@@ -219,7 +230,7 @@ export function JobExplorer() {
   );
 
   function set<K extends keyof JobQuery>(key: K, value: JobQuery[K]) {
-    setQuery((q) => ({ ...q, [key]: value || undefined }));
+    setQuery((q) => ({ ...q, [key]: value === "" ? undefined : value, offset: 0 }));
   }
 
   const forYouActive = (Object.keys(FOR_YOU) as (keyof JobQuery)[]).every(
@@ -242,6 +253,7 @@ export function JobExplorer() {
       // Clicking an active chip clears it; clicking a different chip in the
       // same group replaces it, because one key holds one answer.
       [item.key]: q[item.key] === item.value ? undefined : item.value,
+      offset: 0,
     }));
   }
 
@@ -250,7 +262,7 @@ export function JobExplorer() {
   }
 
   const activeFilters = Object.entries(query).filter(
-    ([k, v]) => !["sort", "limit"].includes(k) && v !== undefined && v !== false,
+    ([k, v]) => !["sort", "limit", "offset"].includes(k) && v !== undefined && v !== false,
   ).length;
 
   function clearAll() {
@@ -326,6 +338,11 @@ export function JobExplorer() {
           <option value="score">Best match</option>
           <option value="salary">Highest salary</option>
           <option value="company">Company</option>
+          <option value="field_relevance">Field relevance</option>
+          <option value="experience">Experience fit</option>
+          <option value="language">Language fit</option>
+          <option value="location">Location priority</option>
+          <option value="company_priority">Company priority</option>
         </Select>
 
         <Button
@@ -345,6 +362,9 @@ export function JobExplorer() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" variant="outline" disabled={!jobs.length} onClick={() => {
+            setReviewMode(true); setOpenJob(jobs.find((j) => !j.reviewed_at)?.id ?? jobs[0].id);
+          }}>Start review</Button>
           <span className="tabular text-[11px] text-muted-foreground">
             {loading ? "…" : `${data?.total ?? 0} roles`}
           </span>
@@ -359,9 +379,24 @@ export function JobExplorer() {
         </div>
       </div>
 
-      {showFilters && <FilterPanel query={query} onChange={set} />}
+      <Drawer open={showFilters} onClose={() => setShowFilters(false)} label="Advanced filters">
+        <div className="flex items-center justify-between p-4"><h2 className="text-sm font-medium">Advanced filters</h2><Button variant="ghost" size="sm" onClick={() => setShowFilters(false)}>Done</Button></div>
+        <FilterPanel query={query} onChange={set} />
+      </Drawer>
 
       <Page>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <Select aria-label="Saved views" value="" onChange={(e) => {
+            const saved = savedViews.data?.find((v) => v.id === Number(e.target.value));
+            if (saved) { setQuery({ ...saved.query, limit: PAGE_SIZE }); setText(String(saved.query.q ?? "")); }
+          }}><option value="">Saved views</option>{savedViews.data?.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</Select>
+          <Input className="h-8 max-w-52 text-xs" aria-label="Name this view" placeholder="Name this view" value={viewName} onChange={(e) => setViewName(e.target.value)} />
+          <Button size="sm" variant="outline" disabled={!viewName.trim()} onClick={async () => {
+            const filters = Object.fromEntries(Object.entries(effective).filter(([key, value]) => !["limit", "offset"].includes(key) && value !== undefined));
+            try { await api.saveSearch(viewName.trim(), filters); setViewName(""); void savedViews.refresh(); toast.success("View pinned"); }
+            catch { toast.error("Could not save this view"); }
+          }}>Pin view</Button>
+        </div>
         {error ? (
           <ErrorState
             title={error.isOffline ? "Cannot reach the backend" : "Could not load jobs"}
@@ -385,16 +420,22 @@ export function JobExplorer() {
         ) : (
           <JobCards jobs={jobs} onOpen={setOpenJob} onPatch={patch} />
         )}
+        {!!data && data.total > PAGE_SIZE && <div className="mt-4 flex items-center justify-end gap-3 text-xs">
+          <Button size="sm" variant="outline" disabled={!query.offset} onClick={() => setQuery((q) => ({ ...q, offset: Math.max(0, (q.offset ?? 0) - PAGE_SIZE) }))}>Previous page</Button>
+          <span>{(query.offset ?? 0) + 1}–{Math.min((query.offset ?? 0) + PAGE_SIZE, data.total)} of {data.total}</span>
+          <Button size="sm" variant="outline" disabled={(query.offset ?? 0) + PAGE_SIZE >= data.total} onClick={() => setQuery((q) => ({ ...q, offset: (q.offset ?? 0) + PAGE_SIZE }))}>Next page</Button>
+        </div>}
       </Page>
 
       <JobDrawer
         jobId={openJob}
+        reviewMode={reviewMode}
         // The panel walks the list you are actually looking at, in the order
         // it is shown, so j/k move through your filtered results rather than
         // some global ordering the drawer invented.
         siblings={jobs.map((j) => j.id)}
         onNavigate={setOpenJob}
-        onClose={() => setOpenJob(null)}
+        onClose={() => { setOpenJob(null); setReviewMode(false); }}
         onChanged={(updated) => {
           setData((prev) =>
             prev
@@ -520,6 +561,12 @@ function FilterPanel({
         <option value="60000">€60k+ stated</option>
         <option value="70000">€70k+ stated</option>
         <option value="80000">€80k+ stated</option>
+      </Select>
+
+      <Select aria-label="Minimum field relevance" value={query.min_relevance ?? ""}
+        onChange={(e) => onChange("min_relevance", e.target.value ? Number(e.target.value) : undefined)}>
+        <option value="">Any field relevance</option><option value="60">60+ field relevance</option>
+        <option value="80">80+ field relevance</option><option value="100">Direct field title</option>
       </Select>
 
       <label className="flex items-center gap-1.5 text-[12px]">

@@ -63,6 +63,7 @@ class WorkdayProvider(Provider):
         sightings: list[Sighting] = []
         seen: set[str] = set()
         dropped_stale = 0
+        complete_snapshot = True
 
         for query in ctx.queries:
             for page in range(pages):
@@ -111,6 +112,8 @@ class WorkdayProvider(Provider):
 
                 if (page + 1) * PAGE_SIZE >= (data.get("total") or 0):
                     break
+            else:
+                complete_snapshot = False
 
         return ProviderResult(
             sightings=sightings,
@@ -119,6 +122,7 @@ class WorkdayProvider(Provider):
                 "date_filter": "server" if facet_ids else "client",
                 "pages_per_query": pages,
                 "stale_dropped": dropped_stale,
+                "complete_snapshot": complete_snapshot,
             },
         )
 

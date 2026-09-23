@@ -159,6 +159,9 @@ export const api = {
 
   // saved searches
   searches: () => request<SavedSearchOut[]>("/api/searches"),
+  saveSearch: (name: string, query: Record<string, unknown>) => request<SavedSearchOut>("/api/searches", {
+    method: "POST", body: JSON.stringify({ name, query, pinned: true }),
+  }),
   searchResults: (id: number, limit = 100) =>
     request<JobPage>(`/api/searches/${id}/results${qs({ limit })}`),
 

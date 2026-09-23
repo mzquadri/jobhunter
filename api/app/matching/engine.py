@@ -126,6 +126,9 @@ class MatchResult:
     reject_reason: str = ""
 
     score: int = 0
+    field_relevance: int | None = None
+    field_evidence: str = ""
+    requirements: list[dict] = field(default_factory=list)
     sub: SubScores = field(default_factory=SubScores)
     reasons: list[str] = field(default_factory=list)
     gaps: list[str] = field(default_factory=list)
@@ -184,8 +187,11 @@ class MatchEngine:
             term for terms in (profile.skills or {}).values() for term in terms
         ]
 
+        # Keep the full-time feed safe even when an older/private profile
+        # predates one of these canonical academic-role exclusions.
+        not_fulltime = set(profile.not_fulltime) | {"postdoc", "post-doc"}
         self._not_fulltime = [re.compile(rf"(?<![a-z]){re.escape(t)}", re.I)
-                              for t in profile.not_fulltime]
+                              for t in not_fulltime]
         # `roles.include` used to be a hard title gate -- the rule that
         # rejected "Perception Engineer" outright. It now widens the relevance
         # classifier instead, so the setting still decides what counts as this
@@ -391,6 +397,13 @@ class MatchEngine:
         description = description or ""
         text = f"{title}\n{description}"
 
+        employment_hint = str((structured or {}).get("employment_type", ""))
+        if employment_hint and not _FULLTIME_HINT.search(employment_hint) and re.search(
+            r"part[ _-]?time|intern|student|freelance|contract|temporary|apprentice|thesis|phd",
+            employment_hint, re.I,
+        ):
+            return MatchResult(keep=False, reject_reason="not a full-time position")
+
         relevance = classify_relevance(title, description, tags, self._target_titles)
         if reason := self._gate(title, location, age_days, relevance):
             return MatchResult(keep=False, reject_reason=reason, age_days=age_days)
@@ -499,6 +512,16 @@ class MatchEngine:
 
         return MatchResult(
             keep=True,
+            field_relevance=round(relevance.confidence * 100),
+            field_evidence=f"{relevance.reason}: {relevance.evidence}",
+            requirements=[
+                *[{"name": skill, "state": "matched", "evidence": "Named in posting and profile"}
+                  for skill in skills.matched],
+                *[{"name": t.requirement, "state": "transferable", "evidence": t.sentence()}
+                  for t in transfers.transfers],
+                *[{"name": skill, "state": "missing", "evidence": "Not listed in profile"}
+                  for skill in transfers.unmet],
+            ],
             score=max(0, min(100, round(score))),
             sub=sub,
             reasons=reasons[:8],

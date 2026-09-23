@@ -116,6 +116,24 @@ empty field, since it looks like information.
 looks identical to a run where nothing was posted, unless the difference is
 recorded. Every source's outcome is stored per run and shown on the dashboard.
 
+## v3 source and review rules
+
+CareerOS prefers official employer and ATS sources over boards. The registry
+tracks 372 employers: 117 have verified automated sources and 255 remain
+explicit manual watchlist entries because no safe, repeatable structured
+endpoint has been verified. A manual employer is never counted as monitored
+automation.
+
+Providers use latest-first requests and posting-date cutoffs where supported.
+ETags, Last-Modified, and 304 responses are recorded as successful unchanged
+checks; a 304 is not a complete snapshot and cannot close jobs. Official
+provenance wins deduplication while board provenance is retained.
+
+Field relevance is stored separately from candidate match, with evidence and a
+requirement matrix for matched, transferable, partial, missing, and blocking
+requirements. Saved searches and review mode support a focused pass through new
+roles with J/K navigation, save, ignore, prepare, and official-posting actions.
+
 ## Quick start
 
 Requires Docker.

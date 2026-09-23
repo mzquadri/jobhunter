@@ -130,6 +130,7 @@ SUPPORTING_BODY = _words(
 # else, because "Sales Engineer" contains "Engineer" and a body full of
 # buzzwords will not make it an ML role.
 OUT_OF_FIELD_TITLE = _words(
+    "data entry", "human resources", "hr manager", "marketing",
     "sales", "account executive", "account manager", "business development",
     "recruiter", "recruiting", "talent acquisition", "hr business partner",
     "human resources", "personalreferent", "marketing manager",
