@@ -58,6 +58,36 @@ def client(session_factory, monkeypatch):
     app.dependency_overrides.clear()
 
 
+@pytest.mark.parametrize(
+    "origin",
+    ["http://localhost:3000", "http://127.0.0.1:3000"],
+)
+def test_loopback_origins_are_allowed(client, origin):
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+
+
+def test_untrusted_origin_is_not_allowed(client):
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "https://evil.example",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers
+
+
 def make_job(session, **kw) -> Job:
     today = date.today()
     defaults = dict(

@@ -81,7 +81,7 @@ services:
       <<: *api-env
       # The API serves; the worker scans. The API has no scheduler at all, so
       # restarting it can never trigger an unscheduled crawl.
-      CORS_ORIGINS: '["http://localhost:${WEB_PORT:-3000}"]'
+      CORS_ORIGINS: '["http://localhost:${WEB_PORT:-3000}","http://127.0.0.1:${WEB_PORT:-3000}"]'
     volumes:
       - ./config:/app/config:ro
       - ./data/drafts:/data/drafts
