@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, PauseCircle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { api, type ProviderHealthOut, type RunDetail, type RunOut } from "@/lib/api";
+import {
+  api,
+  type IndustryProgressOut,
+  type ProviderHealthOut,
+  type RunDetail,
+  type RunOut,
+} from "@/lib/api";
 import { useResource, useScanState } from "@/lib/hooks";
 import {
   Badge,
@@ -135,6 +141,10 @@ export function Automation() {
             {state?.running ? "Scanning" : "Scan now"}
           </Button>
         </div>
+
+        {state?.running && state.by_industry.length > 0 && (
+          <ScanBreakdown industries={state.by_industry} />
+        )}
       </Card>
 
       {/* cadence */}
@@ -290,6 +300,50 @@ export function Automation() {
 }
 
 /* -------------------------------------------------------------------------- */
+
+/**
+ * What the scan is actually getting through, by industry.
+ *
+ * Completed over total, both counted: `done` is employers that have committed
+ * a result row this run, `total` is employers whose source the run intends to
+ * ask. No percentage is synthesised from elapsed time — a bar that fills on a
+ * timer is a lie that happens to look reassuring.
+ */
+function ScanBreakdown({ industries }: { industries: IndustryProgressOut[] }) {
+  return (
+    <div className="border-t border-border px-4 py-3">
+      <p className="mb-2 text-[11px] text-muted-foreground">
+        Sources completed, by industry
+      </p>
+      <ul className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-3">
+        {industries.map((industry) => {
+          const complete = industry.total > 0 && industry.done >= industry.total;
+          return (
+            <li key={industry.key} className="flex items-center gap-2.5">
+              <span className="w-24 shrink-0 truncate text-[11.5px] capitalize">
+                {industry.label}
+              </span>
+              <span className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+                <span
+                  className={cn(
+                    "block h-full rounded-full transition-[width] duration-500",
+                    complete ? "bg-ok" : "bg-info",
+                  )}
+                  style={{
+                    width: `${industry.total ? (industry.done / industry.total) * 100 : 0}%`,
+                  }}
+                />
+              </span>
+              <span className="tabular w-12 shrink-0 text-right text-[11px] text-muted-foreground">
+                {industry.done} / {industry.total}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 function RunRow({ run, onOpen }: { run: RunOut; onOpen: () => void }) {
   return (

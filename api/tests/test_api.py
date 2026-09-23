@@ -322,6 +322,73 @@ class TestRunsNeverOverwriteHumanFields:
         assert body["starred"] is True
 
 
+class TestRecommendedOrdering:
+    """§52 — the ordering the morning view actually uses.
+
+    Score alone buries a role posted three hours ago behind a fortnight-old
+    one; date alone puts a 34 above an 88. These assert the compromise rather
+    than any particular arithmetic, so re-weighting stays possible.
+    """
+
+    def test_it_is_offered(self, client, seeded):
+        assert client.get("/api/jobs?sort=recommended").status_code == 200
+
+    def test_freshness_breaks_a_tie_on_score(self, client, session_factory):
+        with session_factory() as session:
+            make_job(session, id="old|ml|munich", score=80,
+                     posted_at=date.today() - timedelta(days=12))
+            make_job(session, id="new|ml|munich", score=80,
+                     posted_at=date.today())
+        order = [j["id"] for j in
+                 client.get("/api/jobs?sort=recommended").json()["items"]]
+        assert order.index("new|ml|munich") < order.index("old|ml|munich")
+
+    def test_a_much_better_match_still_wins_over_freshness(self, client, session_factory):
+        # The nudges are small next to the score on purpose: recency should
+        # break ties, not overturn a real difference in fit.
+        with session_factory() as session:
+            make_job(session, id="fresh-weak|ml|munich", score=40,
+                     posted_at=date.today())
+            make_job(session, id="old-strong|ml|munich", score=88,
+                     posted_at=date.today() - timedelta(days=12))
+        order = [j["id"] for j in
+                 client.get("/api/jobs?sort=recommended").json()["items"]]
+        assert order.index("old-strong|ml|munich") < order.index("fresh-weak|ml|munich")
+
+    def test_a_shortlisted_employer_is_lifted(self, client, session_factory):
+        with session_factory() as session:
+            session.add(Company(id="dreamco", name="Dream Co", tier="dream"))
+            session.add(Company(id="plainco", name="Plain Co", tier="normal"))
+            session.commit()
+            make_job(session, id="dreamco|ml|munich", company_id="dreamco",
+                     company_name="Dream Co", score=70, posted_at=date.today())
+            make_job(session, id="plainco|ml|munich", company_id="plainco",
+                     company_name="Plain Co", score=70, posted_at=date.today())
+        order = [j["id"] for j in
+                 client.get("/api/jobs?sort=recommended").json()["items"]]
+        assert order.index("dreamco|ml|munich") < order.index("plainco|ml|munich")
+
+    def test_a_role_needing_fluent_german_sinks(self, client, session_factory):
+        with session_factory() as session:
+            make_job(session, id="english|ml|munich", score=70,
+                     language_requirement="english_only", posted_at=date.today())
+            make_job(session, id="germanc1|ml|munich", score=70,
+                     language_requirement="german_c1_plus", posted_at=date.today())
+        order = [j["id"] for j in
+                 client.get("/api/jobs?sort=recommended").json()["items"]]
+        assert order.index("english|ml|munich") < order.index("germanc1|ml|munich")
+
+    def test_a_role_from_an_unknown_employer_is_still_ranked(self, client, session_factory):
+        # Outer join: a board-discovered role whose company row does not exist
+        # yet must not vanish from the default view.
+        with session_factory() as session:
+            make_job(session, id="nobody|ml|munich", company_id=None,
+                     company_name="Nobody Ltd", score=75, posted_at=date.today())
+        ids = [j["id"] for j in
+               client.get("/api/jobs?sort=recommended").json()["items"]]
+        assert "nobody|ml|munich" in ids
+
+
 class TestStats:
     def test_reports_counts_and_charts(self, client, seeded):
         body = client.get("/api/stats").json()

@@ -12,6 +12,7 @@ import {
   type SubScores,
 } from "@/lib/api";
 import { Badge, Button } from "@/components/ui/primitives";
+import { CompanyLogo } from "@/components/companies/logo";
 import { cn, isBlockingFlag, postedAge } from "@/lib/utils";
 
 /* -------------------------------------------------------------------------- */
@@ -300,8 +301,11 @@ export function JobFeedRow({
           {job.tier === "dream" && <Badge variant="outline">Shortlist</Badge>}
           <FlagBadges flags={job.flags} />
         </span>
-        <span className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 text-[11px] text-muted-foreground">
-          <span className="font-medium text-foreground/80">{job.company_name}</span>
+        <span className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <CompanyLogo name={job.company_name} size="sm" />
+            <span className="font-medium text-foreground/80">{job.company_name}</span>
+          </span>
           <span>{job.city || job.location_raw || "location not stated"}</span>
           {job.remote_label !== "Not stated" && <span>{job.remote_label}</span>}
           <span>{postedAge(job.age_days, job.posted_at)}</span>

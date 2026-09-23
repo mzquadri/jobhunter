@@ -22,11 +22,11 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
-from sqlalchemy import func, select, update
+from sqlalchemy import false, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.dedup import JobGroup, Sighting, deduplicate
@@ -116,7 +116,18 @@ def run_discovery(
         # jobs are written, so every posting can be linked to one.
         adopted = adopt_discovered_companies(session, [g for g, _ in scored])
 
-        new_ids, updated, closed = _persist(session, scored, profile)
+        # Which sources this run actually asked. Anything else must not have
+        # its vacancies closed just because they were not seen this time.
+        asked_company_ids = {
+            slugify(t.company)
+            for t in tasks
+            if t.company and t.provider not in BOARD_PROVIDERS
+        }
+        asked_boards = {t.provider for t in tasks if t.provider in BOARD_PROVIDERS}
+
+        new_ids, updated, closed = _persist(
+            session, scored, profile, asked_company_ids, asked_boards
+        )
         drafts = _write_drafts(session, scored, new_ids, profile, settings)
         _refresh_company_counts(session)
         _archive(session, profile)
@@ -268,13 +279,42 @@ def _match_key(name: str) -> str:
     return "".join(ch for ch in text if ch.isalnum())
 
 
+#: How often each tier's employers are worth asking, in minutes.
+#:
+#: 117 sources every hour is 2,800 requests a day to other people's servers to
+#: re-read a market that moves in days, not minutes. The employers you actually
+#: care about keep the hourly cadence; the rest are asked often enough that a
+#: posting is still fresh when it arrives.
+#:
+#: 0 means every run. A company whose last check is unknown is always due, so a
+#: newly added employer is read immediately rather than waiting out its tier.
+CADENCE_MINUTES: dict[str, int] = {
+    CompanyTier.DREAM: 0,        # every run
+    CompanyTier.HIGH: 0,         # every run
+    CompanyTier.NORMAL: 240,     # four hours
+    CompanyTier.IGNORED: 1440,   # daily, in case the tier is changed back
+}
+
+
+def _is_due(company: Company, now: datetime) -> bool:
+    """Whether this employer's cadence has elapsed since the last check."""
+    interval = CADENCE_MINUTES.get(company.tier, 0)
+    if interval <= 0 or company.last_checked_at is None:
+        return True
+    last = company.last_checked_at
+    if last.tzinfo is None:                     # SQLite hands back naive values
+        last = last.replace(tzinfo=UTC)
+    return (now - last) >= timedelta(minutes=interval)
+
+
 def _build_tasks(
     session: Session, profile: Profile, settings: Settings, run: Run
 ) -> list[Task]:
-    """Every source to ask this run, minus the ones currently backed off."""
+    """Every source to ask this run, minus the ones backed off or not yet due."""
     known = health.load_all(session)
     tasks: list[Task] = []
 
+    now = utcnow()
     for company in session.scalars(
         select(Company).where(Company.enabled.is_(True), Company.adapter.is_not(None))
     ).all():
@@ -286,6 +326,13 @@ def _build_tasks(
             session.add(RunProvider(
                 run_id=run.id, provider=company.adapter, target=company.name,
                 state=ProviderState.SKIPPED, error="backed off after repeated failures",
+            ))
+            continue
+        if not _is_due(company, now):
+            session.add(RunProvider(
+                run_id=run.id, provider=company.adapter, target=company.name,
+                state=ProviderState.SKIPPED,
+                error=f"not due yet ({CADENCE_MINUTES.get(company.tier, 0)}m cadence)",
             ))
             continue
         tasks.append(Task(company.adapter, company.adapter_arg or "",
@@ -508,7 +555,11 @@ def _score(
 # persistence
 # ---------------------------------------------------------------------------
 def _persist(
-    session: Session, scored: list[tuple[JobGroup, MatchResult]], profile: Profile
+    session: Session,
+    scored: list[tuple[JobGroup, MatchResult]],
+    profile: Profile,
+    asked_company_ids: set[str],
+    asked_boards: set[str],
 ) -> tuple[set[str], int, int]:
     now = utcnow()
     seen_ids = {group.key for group, _ in scored}
@@ -603,9 +654,24 @@ def _persist(
 
     session.flush()
 
+    # A run may only close what it actually looked at.
+    #
+    # This used to close every open job not seen this run, which was correct
+    # while every source was asked every time. Tiered cadence broke that
+    # assumption hard: a normal-tier employer is asked every four hours, so on
+    # the five runs in between, all of their still-open vacancies were marked
+    # closed and then reopened -- jobs vanishing from the dashboard for hours,
+    # "job closed" signals firing constantly, and the closed count meaningless.
+    #
+    # Coverage is per source, not per run: an employer's jobs are closable only
+    # when that employer was asked, and a board's jobs only when that board ran.
+    covered = or_(
+        Job.company_id.in_(asked_company_ids) if asked_company_ids else false(),
+        Job.source.in_(asked_boards) if asked_boards else false(),
+    )
     closed = session.execute(
         update(Job)
-        .where(Job.is_open.is_(True), Job.id.notin_(seen_ids or {""}))
+        .where(Job.is_open.is_(True), Job.id.notin_(seen_ids or {""}), covered)
         .values(is_open=False, removed_at=now)
     ).rowcount or 0
 

@@ -149,8 +149,8 @@ about a minute.
 
 | Screen | For |
 | --- | --- |
-| **Overview** | What changed since you last looked: new roles, career signals, pipeline and the employers you have to check by hand |
-| **Jobs** | The explorer. One-click views, full filter panel, table or cards, and a detail panel that keeps you in your list |
+| **Overview** | What changed since you last looked: high-priority roles, the larger "worth applying" list, career signals, shortlist radar, where the market is active, and coverage |
+| **Jobs** | The explorer. Opens on *Recommended* — match, plus nudges for freshness, employer priority and a language you have. Grouped one-click views, and a detail panel you can walk with `j`/`k` without losing your place |
 | **Applications** | A pipeline board. Drag a role between stages, or move it from the menu on the card |
 | **Companies** | Who is watched, what state each source is actually in, and who publishes no feed at all |
 | **Automation** | What the scanner is doing and what it did — schedule, run history, per-source health |
@@ -266,6 +266,21 @@ because the word PyTorch is in the posting.
 
 See [docs/architecture.md](docs/architecture.md) for the full pipeline,
 deduplication strategy and the invariants the design protects.
+
+## Scan cadence
+
+Shortlisted and priority employers are asked every run. Everything else is
+asked every four hours, and a broken source is backed off.
+
+Not a micro-optimisation: 117 sources every hour is about 2,800 requests a day
+to other people's servers to re-read a market that moves in days. An employer
+that has never been checked is always due, so adding one shows results on the
+next run rather than after its tier elapses.
+
+One consequence is worth stating because getting it wrong is silent. A run may
+only close vacancies belonging to sources it actually asked — otherwise every
+employer skipped by the cadence has all of their still-open roles marked closed
+and reopened four hours later.
 
 ## Scheduler
 
