@@ -1,5 +1,15 @@
 # CareerOS
 
+<!-- project-story:start -->
+<p align="center"><img src="docs/assets/architecture-animated.svg" alt="Animated architecture diagram of this project" width="100%"></p>
+
+| Problem | Why it mattered | Result |
+|---|---|---|
+| Most job results are senior, expired or ineligible. | Reading them all is the actual work. | **321** employers in the registry, 117 with a verified feed |
+
+[See it animated on mzquadri.de](https://mzquadri.de/work/jobhunter)
+<!-- project-story:end -->
+
 Finds the AI/ML jobs worth applying to, explains why each one scored what it
 did, tracks the ones you pursue, and drafts the cover letter — so the work left
 is reading and deciding, not searching.
