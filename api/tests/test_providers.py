@@ -13,6 +13,9 @@ Greenhouse's two different date fields.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
+
 import httpx
 import pytest
 
@@ -20,6 +23,12 @@ from app.providers import REGISTRY, FetchContext, run_provider
 from app.providers.base import Provider
 from app.security import RateLimit
 from app.settings import get_settings
+
+
+# Providers drop postings older than max_age_days, so fixture dates are relative to
+# today. Fixed dates made these tests fail once the calendar moved past them.
+PUBLISHED = datetime.now(UTC) - timedelta(days=3)
+UPDATED = PUBLISHED + timedelta(days=2)
 
 
 def make_ctx(handler, queries=("machine learning",), max_age_days=14) -> FetchContext:
@@ -171,15 +180,15 @@ class TestGreenhouse:
             "title": "Machine Learning Engineer",
             "absolute_url": "https://boards.greenhouse.io/helsing/jobs/123",
             "location": {"name": "Munich"},
-            "first_published": "2026-09-19T10:00:00Z",
+            "first_published": PUBLISHED.strftime("%Y-%m-%dT%H:%M:%SZ"),
             # An edit today must not make a month-old role look brand new.
-            "updated_at": "2026-09-21T10:00:00Z",
+            "updated_at": UPDATED.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }]}
         result = run_provider(
             REGISTRY["greenhouse"], "helsing", "Helsing", "high",
             make_ctx(lambda _r: json_response(payload)),
         )
-        assert result.sightings[0].posted == "2026-09-19"
+        assert result.sightings[0].posted == PUBLISHED.strftime("%Y-%m-%d")
         assert days_old(result.sightings[0].posted) is not None
 
 
@@ -190,7 +199,7 @@ SF_RSS = """<?xml version="1.0"?><rss><channel>
 <item>
   <title><![CDATA[AI Engineer (m/w/d)]]></title>
   <link>https://jobs.bmwgroup.com/job/123</link>
-  <pubDate>Sun, 21 Sep 2026 08:00:00 GMT</pubDate>
+  <pubDate>__PUBLISHED__</pubDate>
   <description><![CDATA[<p>You will build models in <b>PyTorch</b>.</p>]]></description>
 </item>
 <item>
@@ -203,7 +212,9 @@ class TestSuccessFactors:
     def test_parses_the_feed_and_cleans_html(self):
         result = run_provider(
             REGISTRY["successfactors"], "jobs.bmwgroup.com", "BMW Group", "dream",
-            make_ctx(lambda _r: httpx.Response(200, text=SF_RSS)),
+            make_ctx(lambda _r: httpx.Response(
+                200, text=SF_RSS.replace("__PUBLISHED__", format_datetime(PUBLISHED, usegmt=True)),
+            )),
         )
         assert len(result.sightings) == 1          # the malformed item is skipped
         sighting = result.sightings[0]
@@ -225,7 +236,7 @@ class TestJobsCh:
                 "company_name": "Example AG",
                 "place": "Zurich",
                 "regions": [{"name": None}],
-                "publication_date": "2026-09-20T10:00:00+02:00",
+                "publication_date": PUBLISHED.isoformat(),
                 "preview": "Short preview only.",
                 "language_skills": [{"language": "de", "level": 3}],
                 "_links": {"detail_en": {"href": "https://www.jobs.ch/en/vacancies/detail/abc/"}},
@@ -291,7 +302,7 @@ class TestFailureIsolation:
             # collector into a proxy for it.
             "absolute_url": "http://169.254.169.254/latest/meta-data/",
             "location": {"name": "Munich"},
-            "first_published": "2026-09-20T10:00:00Z",
+            "first_published": PUBLISHED.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }]}
         result = run_provider(
             REGISTRY["greenhouse"], "x", "X", "normal",
