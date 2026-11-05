@@ -24,7 +24,6 @@ from app.providers.base import Provider
 from app.security import RateLimit
 from app.settings import get_settings
 
-
 # Providers drop postings older than max_age_days, so fixture dates are relative to
 # today. Fixed dates made these tests fail once the calendar moved past them.
 PUBLISHED = datetime.now(UTC) - timedelta(days=3)
